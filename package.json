@@ -1,0 +1,29 @@
+{
+  "name": "airprinter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "i18next": "^25.8.13",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "i18next-http-backend": "^3.0.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/i18next": "^13.0.0",
+    "autoprefixer": "^10.4.24",
+    "daisyui": "^5.5.19",
+    "postcss": "^8.5.6",
+    "tailwindcss": "3",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3"
+  }
+}
