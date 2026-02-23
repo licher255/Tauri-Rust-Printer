@@ -24,6 +24,7 @@ pnpm tauri build
 | `pnpm dev`                 | 仅前端开发 | 在浏览器中调试前端   |
 
 ## Structure
+```
 airprinter/
 ├── src/                             ← 前端
 │   ├── main.ts                      ← 入口（只负责初始化）
@@ -66,3 +67,4 @@ airprinter/
 │   │       └── printer.rs          ← 打印机模型
 │   │
 │   └── Cargo.toml
+```
