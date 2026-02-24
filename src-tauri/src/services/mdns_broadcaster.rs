@@ -8,6 +8,9 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 pub struct MdnsBroadcaster {
     daemon: ServiceDaemon,
     service_name: String,
+    ip: String,          // 保存 IP
+    port: u16,           // 保存端口
+    txt_records: HashMap<String, String>, // 👈 保存完整的 TXT 记录
     _heartbeat: Option<thread::JoinHandle<()>>,
     running: Arc<AtomicBool>,
 }
@@ -20,6 +23,9 @@ impl MdnsBroadcaster {
         Ok(Self {
             daemon,
             service_name: String::new(),
+            ip: String::new(), // 初始化
+            port: 0,
+            txt_records: HashMap::new(), // 初始化
             _heartbeat: None,
             running: Arc::new(AtomicBool::new(false)),
         })
@@ -57,6 +63,7 @@ impl MdnsBroadcaster {
         txt_records.insert("URF".to_string(), 
             "V1.4,CP1,PQ3-4-5,RS300-600,MT1-2-3-4-5,W8,SRGB24,ADOBERGB24,IS1".to_string()
         );
+        txt_records.insert("priority".to_string(), "0".to_string());
         
         // 生成 UUID
         let uuid = format!("b15525c7-8885-4279-a0a2-2ec669b9f{:04}", 
@@ -86,7 +93,7 @@ impl MdnsBroadcaster {
         println!("AirPrint 服务已广播: {} 在 {}:{}", self.service_name, ip, port);
 
         // 启动心跳线程：定期重新注册防止过期
-        self.start_heartbeat(printer_name.to_string(), ip.to_string(), port);
+        self.start_heartbeat(); 
 
         Ok(())
     }
@@ -113,11 +120,14 @@ impl MdnsBroadcaster {
         Ok(())
     }
 
-    fn start_heartbeat(&mut self, printer_name: String, ip: String, port: u16) {
+    fn start_heartbeat(&mut self) {
         self.running.store(true, Ordering::Relaxed);
         let running = self.running.clone();
         let daemon = self.daemon.clone();
         let service_name = self.service_name.clone();
+        let ip = self.ip.clone(); // 从结构体获取
+        let port = self.port;
+        let txt_records = self.txt_records.clone(); // 👈 从结构体获取完整的 TXT 记录
 
         self._heartbeat = Some(thread::spawn(move || {
             let mut count = 0;
@@ -126,26 +136,33 @@ impl MdnsBroadcaster {
                 count += 1;
                 println!("mDNS 心跳 #{} - 服务: {}", count, service_name);
                 
-                // 每 60 秒重新注册一次（防止某些路由器过期）
+                // 每 60 秒重新注册一次
                 if count % 6 == 0 {
                     println!("重新注册 mDNS 服务...");
-                    // 重新创建并注册服务
                     let _ = daemon.unregister(&format!("{}._ipp._tcp.local.", service_name));
+                    let _ = daemon.unregister(&format!("{}._universal._sub._ipp._tcp.local.", service_name));
                     
-                    // 简单的重新注册逻辑
-                    let mut txt = HashMap::new();
-                    txt.insert("txtvers".to_string(), "1".to_string());
-                    txt.insert("qtotal".to_string(), "1".to_string());
-                    
-                    if let Ok(info) = ServiceInfo::new(
+                    // 使用完整的 txt_records 重新注册
+                    if let Ok(main_info) = ServiceInfo::new(
                         "_ipp._tcp.local.",
                         &service_name,
                         &format!("{}._ipp._tcp.local.", service_name),
                         &ip,
                         port,
-                        txt,
+                        txt_records.clone(), // 👈 这里是关键！
                     ) {
-                        let _ = daemon.register(info);
+                        let _ = daemon.register(main_info);
+                    }
+
+                    if let Ok(univ_info) = ServiceInfo::new(
+                        "_universal._sub._ipp._tcp.local.",
+                        &service_name,
+                        &format!("{}._universal._sub._ipp._tcp.local.", service_name),
+                        &ip,
+                        port,
+                        txt_records.clone(),
+                    ) {
+                        let _ = daemon.register(univ_info);
                     }
                 }
             }

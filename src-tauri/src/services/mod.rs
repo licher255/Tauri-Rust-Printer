@@ -6,3 +6,6 @@ pub use airprint_server::AirPrintServer;
 
 pub mod mdns_broadcaster;
 pub use mdns_broadcaster::MdnsBroadcaster;
+
+pub mod ipp;
+pub use ipp::IppServer;

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use crate::models::Printer;
 use crate::services::MdnsBroadcaster;
+use crate::services::ipp::IppServer;
 
 pub struct AirPrintServer {
     shared_printers: HashMap<String, Printer>,
     mdns: Option<MdnsBroadcaster>,
+    ipp_server: Option<IppServer>,
 }
 
 impl AirPrintServer {
@@ -12,6 +14,7 @@ impl AirPrintServer {
         Self {
             shared_printers: HashMap::new(),
             mdns: None,
+            ipp_server: None,
         }
     }
 
@@ -23,6 +26,14 @@ impl AirPrintServer {
         }
         
         println!("开始共享打印机: {}", printer.name);
+
+        // 启动 IPP 服务器
+        if self.ipp_server.is_none() {
+            let ipp = IppServer::new("0.0.0.0", 631);
+            ipp.start();
+            self.ipp_server = Some(ipp);
+            println!("IPP 服务器已启动");
+        }
         
         // 初始化 mDNS 广播（如果还没有）
         if self.mdns.is_none() {
@@ -34,10 +45,8 @@ impl AirPrintServer {
             mdns.broadcast_airprint(&printer.name, 631)?;
         }
         
-        // TODO: 启动 IPP 服务器接收打印任务
-        
         self.shared_printers.insert(printer_id.clone(), printer);
-        Ok(format!("打印机 {} 已共享到网络（AirPrint）", printer_id))
+        Ok(format!("打印机 {} 已共享到网络(AirPrint)", printer_id))
     }
 
     pub fn stop(&mut self, printer_id: &str) -> Result<(), String> {
