@@ -1,5 +1,8 @@
 pub mod printer_detector;
-pub mod airprint_server;
-
 pub use printer_detector::PrinterDetector;
+
+pub mod airprint_server;
 pub use airprint_server::AirPrintServer;
+
+pub mod mdns_broadcaster;
+pub use mdns_broadcaster::MdnsBroadcaster;

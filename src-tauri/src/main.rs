@@ -7,7 +7,7 @@ use airprinter::*;
 use airprinter::services::{PrinterDetector, AirPrintServer};
 
 // 从 lib.rs 导入命令
-use airprinter::commands::{get_printers, share_printer, stop_printer, AppState};
+use airprinter::commands::{get_printers, share_printer, stop_printer, get_shared_printers, AppState};
 
 fn main() {
     tauri::Builder::default()
@@ -25,6 +25,7 @@ fn main() {
             get_printers,
             share_printer,
             stop_printer,
+            get_shared_printers,
         ])
         
         .run(tauri::generate_context!())

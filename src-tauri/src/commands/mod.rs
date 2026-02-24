@@ -38,3 +38,18 @@ pub fn stop_printer(
     let mut server = state.server.lock().map_err(|e| e.to_string())?;
     server.stop(&printer_id)
 }
+
+#[tauri::command]
+pub fn get_shared_printers(state: State<AppState>) -> Result<Vec<Printer>, String> {
+    let server = state.server.lock().map_err(|e| e.to_string())?;
+    Ok(server.get_shared_printers().into_iter().cloned().collect())
+}
+
+#[tauri::command]
+pub fn unshare_printer(
+    printer_id: String,
+    state: State<AppState>
+) -> Result<(), String> {
+    let mut server = state.server.lock().map_err(|e| e.to_string())?;
+    server.stop(&printer_id)
+}

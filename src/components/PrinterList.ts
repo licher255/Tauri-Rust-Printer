@@ -5,6 +5,7 @@ export class PrinterList {
   private listContainer: HTMLElement;
   private refreshBtn: HTMLButtonElement;
   private printers: Printer[] = [];
+  private sharedPrinterIds: Set<string> = new Set();
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -16,7 +17,7 @@ export class PrinterList {
     this.refreshBtn = this.container.querySelector("#refresh-btn")!;
 
     this.bindEvents();
-    this.load(); // 自动加载
+    this.load(); // 自动加载（里面已经调用 loadSharedPrinters）
   }
 
   private render() {
@@ -45,7 +46,14 @@ export class PrinterList {
   async load() {
     this.setLoading(true);
     try {
-      this.printers = await printerApi.getList();
+      // 同时获取打印机列表和共享状态
+      const [printers, shared] = await Promise.all([
+        printerApi.getList(),
+        printerApi.getSharedList()
+      ]);
+      
+      this.printers = printers;
+      this.sharedPrinterIds = new Set(shared.map(p => p.id));
       this.renderList();
     } catch (error) {
       this.listContainer.innerHTML = `<div class="text-error">加载失败: ${error}</div>`;
@@ -60,52 +68,80 @@ export class PrinterList {
       return;
     }
 
-    this.listContainer.innerHTML = this.printers.map(p => `
-      <div class="flex items-center justify-between p-3 bg-base-200 rounded-lg">
-        <div class="flex items-center gap-3">
-          <span class="text-2xl">🖨️</span>
-          <div>
-            <div class="font-bold">${p.name}</div>
-            <div class="text-xs text-gray-500">ID: ${p.id}</div>
+    this.listContainer.innerHTML = this.printers.map(p => {
+      const statusStr = (p.status || '').toString().toLowerCase();
+      const isOnline = statusStr === 'online';
+      const isShared = this.sharedPrinterIds.has(p.id);  // 检查是否已共享
+      
+      const statusText = isOnline ? '在线' : '离线';
+      const badgeClass = isOnline ? 'badge-success' : 'badge-error';
+      
+      // 根据共享状态显示不同按钮
+      const btnClass = isShared ? 'btn-error' : 'btn-primary';
+      const btnText = isShared ? '停止共享' : '共享';
+      const btnDisabled = !isOnline && !isShared;  // 离线且未共享时禁用
+      
+      return `
+        <div class="flex items-center justify-between p-3 bg-base-200 rounded-lg">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">🖨️</span>
+            <div>
+              <div class="font-bold">${p.name}</div>
+              <div class="text-xs text-gray-500">ID: ${p.id}</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="badge ${badgeClass}">${statusText}</span>
+            <button 
+              class="btn btn-xs ${btnClass} share-btn" 
+              data-id="${p.id}"
+              data-shared="${isShared}"
+              ${btnDisabled ? 'disabled' : ''}
+            >
+              ${btnText}
+            </button>
           </div>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="badge ${p.status === 'online' ? 'badge-success' : 'badge-error'}">
-            ${p.status === 'online' ? '在线' : '离线'}
-          </span>
-          <button 
-            class="btn btn-xs btn-primary share-btn" 
-            data-id="${p.id}"
-            ${p.status !== 'online' ? 'disabled' : ''}
-          >
-            共享
-          </button>
-        </div>
-      </div>
-    `).join("");
+      `;
+    }).join("");
 
-    // 绑定共享按钮
+    // 绑定共享按钮事件
     this.listContainer.querySelectorAll(".share-btn").forEach(btn => {
       btn.addEventListener("click", (e) => {
-        const id = (e.target as HTMLButtonElement).dataset.id!;
-        this.handleShare(id);
+        const target = e.target as HTMLButtonElement;
+        const id = target.dataset.id!;
+        const isShared = target.dataset.shared === "true";
+        this.handleShare(id, isShared, target);
       });
     });
   }
 
-  private async handleShare(printerId: string) {
-    const btn = this.listContainer.querySelector(`[data-id="${printerId}"]`) as HTMLButtonElement;
+  // 修改：处理共享/取消共享
+  private async handleShare(printerId: string, isShared: boolean, btn: HTMLButtonElement) {
     btn.disabled = true;
-    btn.textContent = "共享中...";
+    btn.textContent = isShared ? "停止中..." : "共享中...";
 
     try {
-      await printerApi.share(printerId);
-      btn.textContent = "已共享";
-      btn.classList.remove("btn-primary");
-      btn.classList.add("btn-success");
+      if (isShared) {
+        // 取消共享
+        await printerApi.unshare(printerId);
+        this.sharedPrinterIds.delete(printerId);
+        alert("✅ 已停止共享");
+      } else {
+        // 开始共享
+        const result = await printerApi.share(printerId);
+        this.sharedPrinterIds.add(printerId);
+        alert(`✅ ${result}`);
+      }
+      
+      // 重新渲染列表更新按钮状态
+      this.renderList();
+      
     } catch (error) {
+      alert(`❌ 操作失败: ${error}`);
+      // 恢复原按钮文字
+      btn.textContent = isShared ? "停止共享" : "共享";
       btn.disabled = false;
-      btn.textContent = "共享";
     }
   }
 
