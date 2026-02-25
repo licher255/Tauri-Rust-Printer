@@ -61,7 +61,7 @@ impl MdnsBroadcaster {
         txt_records.insert("kind".to_string(), "document".to_string());
         txt_records.insert("PaperMax".to_string(), "legal-A4".to_string());
         txt_records.insert("URF".to_string(), 
-            "V1.4,CP1,PQ3-4-5,RS300-600,MT1-2-3-4-5,W8,SRGB24,ADOBERGB24,IS1".to_string()
+            "V1.4,CP1,PQ3,PQ4,PQ5,RS300,RS600,MT1-2-3-4-5,W8,SRGB24,ADOBERGB24,IS1".to_string()
         );
         txt_records.insert("priority".to_string(), "0".to_string());
         
