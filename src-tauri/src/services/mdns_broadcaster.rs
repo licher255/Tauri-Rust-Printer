@@ -104,10 +104,13 @@ impl MdnsBroadcaster {
         port: u16,
         txt_records: HashMap<String, String>,
     ) -> Result<(), String> {
+        let clean_instance_name = self.service_name.split('.').next().unwrap_or(&self.service_name);
+        
         let service_info = ServiceInfo::new(
             "_universal._sub._ipp._tcp.local.",
-            &self.service_name,
+            clean_instance_name,// 确保这里只是名字，没有 .local. 后缀
             //&format!("{}._universal._sub._ipp._tcp.local.", self.service_name),
+            "",
             ip,
             port,
             txt_records,
