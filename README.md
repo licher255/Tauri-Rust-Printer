@@ -60,19 +60,18 @@ airprinter/
 │   │   │   ├── mod.rs
 │   │   │   ├── printer_detector.rs ← 打印机检测
 │   │   │   ├── airprint_server.rs  ← AirPrint服务
+<<<<<<< HEAD
 │   │   │   └── ipp/
 |   |   |   |  ├── mod.rs
 |   |   |   |  ├── server.rs
 |   |   |   |  └── protocol.rs
+=======
+│   │   │   └── ipp_handler.rs      ← IPP协议处理
+>>>>>>> parent of da06816 (Update README with new folder structure and testing info)
 │   │   │
 │   │   └── models/                  ← 数据结构（新增文件夹）
 │   │       ├── mod.rs
 │   │       └── printer.rs          ← 打印机模型
 │   │
 │   └── Cargo.toml
-```
-
-## Testing on MacOS
-```
-ipptool -tv ipp://<你的IP地址>:631/ipp/print get-printer-attributes.test
 ```
