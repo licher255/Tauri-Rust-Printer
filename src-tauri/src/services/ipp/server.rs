@@ -170,6 +170,7 @@ impl IppServer {
         resp.extend_from_slice(&0x0000u16.to_be_bytes());
         resp.extend_from_slice(&request_id.to_be_bytes());
 
+<<<<<<< HEAD
         // 操作属性组
         resp.push(OPERATION_ATTRIBUTES_TAG);
         Self::add_attr_charset(&mut resp, "attributes-charset", "utf-8");
@@ -233,6 +234,102 @@ impl IppServer {
         Self::add_attr_keyword(&mut resp, "urf-supported", "RS300");
 
         resp.push(END_OF_ATTRIBUTES_TAG);
+=======
+        // 2. Operation Attributes Group
+        resp.push(OPERATION_ATTRIBUTES_TAG); // begin-operation-attributes (0x01)
+        Self::add_attr_utf8(&mut resp, "attributes-charset", "utf-8");
+        Self::add_attr_language(&mut resp, "attributes-natural-language", "en");
+
+        // 3. Printer Attributes Group
+        resp.push(PRINTER_ATTRIBUTES_TAG); // begin-printer-attributes (0x04)
+
+        // --- Basic Printer Info ---
+        Self::add_attr_text_without_language(&mut resp, "printer-name", "AirPrinter");
+        Self::add_attr_text_without_language(&mut resp, "printer-info", "Virtual AirPrint Printer");
+        Self::add_attr_text_without_language(&mut resp, "printer-location", "Office");
+        Self::add_attr_text_without_language(&mut resp, "printer-make-and-model", "AirPrinter Model A");
+
+        // --- Critical URIs ---
+        // The URI where the printer itself is located. This must be reachable.
+        let printer_uri = format!("ipp://{}/ipp/print", server_address);
+        Self::add_attr_uri(&mut resp, "printer-uri-supported", &printer_uri);
+        
+        // URI for managing jobs (optional but recommended for AirPrint)
+        let job_sheets_default_value = ""; // Or a default like "none,none"
+        Self::add_attr_name_without_language(&mut resp, "job-sheets-supported", "none");
+        Self::add_attr_name_without_language(&mut resp, "job-sheets-default", job_sheets_default_value);
+
+        // --- Printer State (Critical) ---
+        Self::add_attr_enum(&mut resp, "printer-state", 3); // 3 = idle
+        Self::add_attr_keyword(&mut resp, "printer-state-reasons", "none");
+        Self::add_attr_boolean(&mut resp, "printer-is-accepting-jobs", true);
+        // --- Supported Operations (Critical) ---
+        // Provide ALL supported operations in ONE attribute with integer tag (0x23).
+        // Operation codes from your protocol.rs
+        Self::add_attr_integer_list(&mut resp, "operations-supported", vec![
+            OPERATION_GET_PRINTER_ATTRIBUTES, // 0x000B
+            OPERATION_PRINT_JOB,              // 0x0002
+            OPERATION_VALIDATE_JOB,           // 0x0026
+        ]);
+
+        // --- Document Format Support (Critical) ---
+        // Common formats for AirPrint
+        let supported_formats = ["application/pdf", "image/jpeg", "image/png", "image/urf"];
+        for format in &supported_formats {
+            Self::add_attr_mime_media_type(&mut resp, "document-format-supported", format);
+        }
+        // Default format
+        Self::add_attr_mime_media_type(&mut resp, "document-format-default", "application/pdf");
+
+        // --- PDL Override Support (AirPrint specific) ---
+        Self::add_attr_keyword(&mut resp, "pdl-override-supported", "attempted");
+
+        // --- Color Support (AirPrint specific) ---
+        Self::add_attr_boolean(&mut resp, "color-supported", true); // If color printing is desired
+        Self::add_attr_keyword(&mut resp, "output-mode-supported", "monochrome");
+        Self::add_attr_keyword(&mut resp, "output-mode-supported", "color"); // Add this if color is supported
+
+        // --- Page Size Support (AirPrint specific) ---
+        // Example: Standard US Letter size
+        let mut page_size_a = HashMap::new();
+        page_size_a.insert("x-dimension", 21590i32); // 8.5 inches in 1/100th mm
+        page_size_a.insert("y-dimension", 27940i32); // 11 inches in 1/100th mm
+        Self::add_attr_resolution(&mut resp, "media-size-supported", &page_size_a);
+
+        // Example: Standard A4 size
+        let mut page_size_b = HashMap::new();
+        page_size_b.insert("x-dimension", 21000i32); // 210 mm in 1/100th mm
+        page_size_b.insert("y-dimension", 29700i32); // 297 mm in 1/100th mm
+        Self::add_attr_resolution(&mut resp, "media-size-supported", &page_size_b);
+
+        // Default media size
+        let mut default_page_size = HashMap::new();
+        default_page_size.insert("x-dimension", 21590i32);
+        default_page_size.insert("y-dimension", 27940i32);
+        Self::add_attr_resolution(&mut resp, "media-size-default", &default_page_size);
+
+        // --- Quality Support (AirPrint specific) ---
+        Self::add_attr_integer_list(&mut resp, "print-quality-supported", vec![3, 4]); // draft=3, normal=4, high=5
+        Self::add_attr_integer(&mut resp, "print-quality-default", 4); // normal
+
+        // --- Copies Support ---
+        Self::add_attr_integer(&mut resp, "copies-supported", 99); // Max copies
+        Self::add_attr_integer(&mut resp, "copies-default", 1); // Default copies
+
+        // --- URF Support (AirPrint specific) ---
+        Self::add_attr_keyword(&mut resp, "urf-supported", "CP1"); // Color support
+        Self::add_attr_keyword(&mut resp, "urf-supported", "DM1"); // Duplex mode (e.g., one-sided)
+        Self::add_attr_keyword(&mut resp, "urf-supported", "IS1"); // Image scaling
+        Self::add_attr_keyword(&mut resp, "urf-supported", "MT1-2-4-5-3"); // Media types (plain, photo, glossy, etc.)
+        Self::add_attr_keyword(&mut resp, "urf-supported", "RS300"); // Resolution (e.g., 300 dpi)
+        Self::add_attr_keyword(&mut resp, "urf-supported", "W8"); // Supports A4 width
+        Self::add_attr_keyword(&mut resp, "urf-supported", "SRGB24"); // Color space
+        Self::add_attr_keyword(&mut resp, "urf-supported", "V1.4"); // URF version
+
+        // --- End of Attributes ---
+        resp.push(END_OF_ATTRIBUTES_TAG); // end-of-attributes (0x03)
+        
+>>>>>>> parent of bb9699b (Update server.rs)
         resp
     }
 
@@ -321,6 +418,7 @@ impl IppServer {
         Self::encode_name_value(buf, name, value);
     }
 
+<<<<<<< HEAD
     fn add_attr_keyword(buf: &mut Vec<u8>, name: &str, value: &str) {
         buf.push(0x44);
         Self::encode_name_value(buf, name, value);
@@ -342,6 +440,39 @@ impl IppServer {
 
     fn add_attr_enum(buf: &mut Vec<u8>, name: &str, value: i32) {
         buf.push(0x23);
+=======
+    fn add_attr_name_without_language(buf: &mut Vec<u8>, name: &str, value: &str) {
+        buf.push(0x42); // tag: nameWithoutLanguage (no language specified)
+        Self::encode_attr_name_and_value(buf, name, value);
+    }
+
+    fn add_attr_keyword(buf: &mut Vec<u8>, name: &str, value: &str) {
+        buf.push(0x44); // tag: keyword (MUST be ASCII, no whitespace)
+        Self::encode_attr_name_and_value(buf, name, value);
+    }
+
+    fn add_attr_uri(buf: &mut Vec<u8>, name: &str, value: &str) {
+        buf.push(0x45); // tag: uri (Uniform Resource Identifier)
+        Self::encode_attr_name_and_value(buf, name, value);
+    }
+
+    fn add_attr_boolean(buf: &mut Vec<u8>, name: &str, value: bool) {
+        buf.push(0x22); // tag: boolean (1 byte, 0x00 or 0x01)
+        let name_bytes = name.as_bytes();
+        buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
+        buf.extend_from_slice(name_bytes);
+        if value {
+            buf.extend_from_slice(&(1u16).to_be_bytes()); // Length of value
+            buf.push(0x01); // True
+        } else {
+            buf.extend_from_slice(&(1u16).to_be_bytes()); // Length of value
+            buf.push(0x00); // False
+        }
+    }
+
+    fn add_attr_enum(buf: &mut Vec<u8>, name: &str, value: u32) {
+        buf.push(0x23); // tag: enum (32-bit unsigned integer)
+>>>>>>> parent of bb9699b (Update server.rs)
         let name_bytes = name.as_bytes();
         buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
         buf.extend_from_slice(name_bytes);
@@ -358,10 +489,20 @@ impl IppServer {
         buf.extend_from_slice(&value.to_be_bytes());
     }
 
+<<<<<<< HEAD
     fn add_attr_integer_list(buf: &mut Vec<u8>, name: &str, values: Vec<i32>) {
         if values.is_empty() { return; }
         
         buf.push(0x21);
+=======
+    fn add_attr_mime_media_type(buf: &mut Vec<u8>, name: &str, value: &str) {
+        buf.push(0x49); // tag: mimeMediaType (same encoding as keyword)
+        Self::encode_attr_name_and_value(buf, name, value);
+    }
+
+    fn add_attr_integer_list(buf: &mut Vec<u8>, name: &str, values: Vec<u16>) {
+        let first_tag: u8 = 0x21; // Start with integer tag (0x21), explicitly typed as u8
+>>>>>>> parent of bb9699b (Update server.rs)
         let name_bytes = name.as_bytes();
         buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
         buf.extend_from_slice(name_bytes);
@@ -376,6 +517,7 @@ impl IppServer {
         }
     }
 
+<<<<<<< HEAD
     fn add_attr_integer_range(buf: &mut Vec<u8>, name: &str, min: i32, max: i32) {
         buf.push(0x33);
         let name_bytes = name.as_bytes();
@@ -387,6 +529,34 @@ impl IppServer {
     }
 
     fn encode_name_value(buf: &mut Vec<u8>, name: &str, value: &str) {
+=======
+    fn add_attr_resolution(buf: &mut Vec<u8>, name: &str, resolution: &HashMap<&str, i32>) {
+        // Begin collection attribute
+        buf.push(0x34); // tag: begCollection
+        let name_bytes = name.as_bytes();
+        buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
+        buf.extend_from_slice(name_bytes);
+        buf.extend_from_slice(&(0u16).to_be_bytes()); // Length is 0 for begCollection
+
+        // Add members to the collection
+        for (key, &val) in resolution {
+            buf.push(0x21); // tag: integer for dimensions
+            let key_bytes = key.as_bytes();
+            buf.extend_from_slice(&(key_bytes.len() as u16).to_be_bytes());
+            buf.extend_from_slice(key_bytes);
+            buf.extend_from_slice(&(4u16).to_be_bytes()); // Length of i32 value
+            buf.extend_from_slice(&val.to_be_bytes());
+        }
+
+        // End collection attribute
+        buf.push(0x37); // tag: endCollection
+        buf.extend_from_slice(&(0u16).to_be_bytes()); // Name length is 0
+        buf.extend_from_slice(&(0u16).to_be_bytes()); // Value length is 0
+    }
+
+
+    fn encode_attr_name_and_value(buf: &mut Vec<u8>, name: &str, value: &str) {
+>>>>>>> parent of bb9699b (Update server.rs)
         let name_bytes = name.as_bytes();
         buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
         buf.extend_from_slice(name_bytes);
