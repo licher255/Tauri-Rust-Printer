@@ -30,6 +30,20 @@ local-ip-address = "0.6"
 tiny_http = "0.12"
 
 rand = "0.8"
+ipp = "5.4.0"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+[source.crates-io]
+replace-with = 'tuna'
+
+[source.tuna]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+[http]
+check-revoke = false
+timeout = 60
+
+[net]
+git-fetch-with-cli = true
