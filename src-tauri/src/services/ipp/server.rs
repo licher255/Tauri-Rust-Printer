@@ -186,11 +186,11 @@ impl IppServer {
         ]);
 
         // --- Document Formats (CRITICAL FIX: use keyword, not mimeMediaType) ---
-        // AirPrint requires image/urf as default, and all formats as keywords
-        Self::add_attr_keyword(&mut resp, "document-format-supported", "application/pdf");
+        // IPP everywhere  requires image/urf as default, and all formats as keywords
+        Self::add_attr_keyword(&mut resp, "document-format-default", "application/pdf"); 
         Self::add_attr_keyword(&mut resp, "document-format-supported", "image/jpeg");
         Self::add_attr_keyword(&mut resp, "document-format-supported", "image/urf");
-        Self::add_attr_keyword(&mut resp, "document-format-default", "image/urf"); // ✅ MUST be image/urf + keyword
+       
 
         // --- Color & Duplex ---
         Self::add_attr_boolean(&mut resp, "color-supported", true);
