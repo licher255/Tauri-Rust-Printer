@@ -61,9 +61,9 @@ airprinter/
 │   │   │   ├── printer_detector.rs ← 打印机检测
 │   │   │   ├── airprint_server.rs  ← AirPrint服务
 │   │   │   └── ipp/
-|   |   |   |  └──mod.rs
-|   |   |   |  └──server.rs
-|   |   |   |  └──protocol.rs
+|   |   |   |  ├── mod.rs
+|   |   |   |  ├── server.rs
+|   |   |   |  └── protocol.rs
 │   │   │
 │   │   └── models/                  ← 数据结构（新增文件夹）
 │   │       ├── mod.rs
