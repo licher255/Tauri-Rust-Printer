@@ -107,7 +107,7 @@ impl MdnsBroadcaster {
         let service_info = ServiceInfo::new(
             "_universal._sub._ipp._tcp.local.",
             &self.service_name,
-            //&format!("{}._universal._sub._ipp._tcp.local.", self.service_name),
+            &format!("{}._universal._sub._ipp._tcp.local.", self.service_name),
             ip,
             port,
             txt_records,

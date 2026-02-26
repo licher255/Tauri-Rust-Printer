@@ -111,56 +111,6 @@ impl IppServer {
 
     fn handle_get_printer_attributes(request_id: u32, server_address: &str) -> Vec<u8> {
         let printer_uri = format!("ipp://{}/ipp/print", server_address);
-<<<<<<< HEAD
-=======
-        Self::add_attr_uri(&mut resp, "printer-uri-supported", &printer_uri);
-
-        // --- State (CRITICAL) ---
-        Self::add_attr_enum(&mut resp, "printer-state", 3); // idle
-        Self::add_attr_keyword(&mut resp, "printer-state-reasons", "none");
-        Self::add_attr_boolean(&mut resp, "printer-is-accepting-jobs", true); // MUST be boolean!
-
-        // --- Operations (CRITICAL) ---
-        Self::add_attr_integer_list(&mut resp, "operations-supported", vec![
-            0x0002, // Print-Job
-            0x000B, // Get-Printer-Attributes
-            0x0026, // Validate-Job
-        ]);
-
-        // --- Document Formats (CRITICAL FIX: use keyword, not mimeMediaType) ---
-        // AirPrint requires image/urf as default, and all formats as keywords
-        Self::add_attr_keyword(&mut resp, "document-format-supported", "application/pdf");
-        Self::add_attr_keyword(&mut resp, "document-format-supported", "image/jpeg");
-        Self::add_attr_keyword(&mut resp, "document-format-supported", "image/urf");
-        Self::add_attr_keyword(&mut resp, "document-format-default", "image/urf"); // ✅ MUST be image/urf + keyword
-
-        // --- Color & Duplex ---
-        Self::add_attr_boolean(&mut resp, "color-supported", true);
-        Self::add_attr_keyword(&mut resp, "output-mode-supported", "monochrome");
-        Self::add_attr_keyword(&mut resp, "output-mode-supported", "color");
-
-        // --- Copies ---
-        Self::add_attr_integer(&mut resp, "copies-supported", 99);
-        Self::add_attr_integer(&mut resp, "copies-default", 1);
-
-        // --- URF Support (AirPrint specific, includes paper size via W8 etc.) ---
-        // This is often sufficient instead of explicit media-size
-        Self::add_attr_keyword(&mut resp, "urf-supported", "V1.4");
-        Self::add_attr_keyword(&mut resp, "urf-supported", "CP1");   // Color
-        Self::add_attr_keyword(&mut resp, "urf-supported", "DM1");   // Duplex mode (one-sided)
-        Self::add_attr_keyword(&mut resp, "urf-supported", "IS1");   // Image scaling
-        Self::add_attr_keyword(&mut resp, "urf-supported", "MT1-2-3-4-5"); // Media types
-        Self::add_attr_keyword(&mut resp, "urf-supported", "RS300"); // Resolution
-        Self::add_attr_keyword(&mut resp, "urf-supported", "W8");    // Supports up to A4 width (critical!)
-        Self::add_attr_keyword(&mut resp, "urf-supported", "SRGB24"); // Color space
-
-        // --- Job Sheets (optional but recommended) ---
-        Self::add_attr_name_without_language(&mut resp, "job-sheets-supported", "none");
-        Self::add_attr_name_without_language(&mut resp, "job-sheets-default", "none");
-
-        // --- End ---
-        resp.push(END_OF_ATTRIBUTES_TAG); // 0x03
->>>>>>> parent of 60b946b (Fix document format attributes for IPP compliance)
         
         // 创建 IppVersion
         let version = IppVersion::v2_0();
@@ -312,7 +262,6 @@ impl IppServer {
         response.to_bytes().to_vec()
     }
 
-<<<<<<< HEAD
     fn bad_request_with_id(request_id: u32) -> Vec<u8> {
         let version = IppVersion::v2_0();
         let response = IppRequestResponse::new_response(
@@ -323,8 +272,3 @@ impl IppServer {
         response.to_bytes().to_vec()
     }
 }
-=======
-// Example usage in your main function or wherever you create the server:
-// let ipp_server = IppServer::new("0.0.0.0", 631); // Make sure IP is correct
-// ipp_server.start();
->>>>>>> parent of 60b946b (Fix document format attributes for IPP compliance)
