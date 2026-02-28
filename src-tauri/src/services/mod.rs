@@ -10,4 +10,3 @@ pub use mdns_broadcaster::MdnsBroadcaster;
 pub mod ipp;
 pub use ipp::IppServer;
 
-use rust_i18n::t;

@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 use crate::services::{PrinterDetector, AirPrintServer};
-use rust_i18n::t;
+
 
 // 1. 定义共享的应用状态 (所有命令都需要访问它)
 pub struct AppState {

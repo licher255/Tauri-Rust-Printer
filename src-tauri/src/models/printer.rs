@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use rust_i18n::t;
+
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Printer {

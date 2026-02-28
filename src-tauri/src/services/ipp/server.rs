@@ -18,6 +18,11 @@ use ipp::reader::IppReader;
 // 引入翻译宏
 use rust_i18n::t;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 // 定义一个结构体来存储解析出的打印选项
 #[derive(Debug, Clone)]
 struct PrintOptions {
@@ -295,46 +300,108 @@ impl IppServer {
         response.to_bytes().to_vec()
     }
 
-    fn print_document(filepath: &Path, options: &PrintOptions) -> bool {
-        let file_name = filepath.file_name().unwrap_or_default().to_string_lossy();
-        println!("{}", t!("logs.ipp_printing_start", file = file_name, copies = options.copies, sides = options.sides));
+fn print_document(filepath: &Path, options: &PrintOptions) -> bool {
+    let file_name = filepath.file_name().unwrap_or_default().to_string_lossy();
+    println!("{}", t!("logs.ipp_printing_start", file = file_name, copies = options.copies, sides = options.sides));
 
-        #[cfg(target_os = "windows")]
-        {
-            let path_str = filepath.to_string_lossy();
-            
-            let ps_script = format!(
-                r#"
-                $path = "{}"
-                if (Test-Path -LiteralPath $path) {{
-                    Start-Process -FilePath $path -Verb Print -Wait -ErrorAction Stop
-                    Write-Host "Success"
-                }} else {{
-                    Write-Error "File not found"
-                    exit 1
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        
+        let path_str = filepath.to_string_lossy();
+        
+        // 方案：使用 PowerShell 的 Out-Printer 或 .NET PrintDialog
+        // 这是弹出标准 Windows 打印对话框的最可靠方式
+        
+        let ps_script = format!(
+                        r#"
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+
+            $form = New-Object System.Windows.Forms.Form
+            $form.WindowState = 'Minimized'  # 隐藏辅助窗口
+            $form.ShowInTaskbar = $false
+
+            $printDialog = New-Object System.Windows.Forms.PrintDialog
+            $printDialog.UseEXDialog = $true  # 使用现代样式的打印对话框
+            $printDialog.AllowSomePages = $true
+            $printDialog.AllowSelection = $true
+
+            # 创建 PrintDocument 来承载设置
+            $printDoc = New-Object System.Drawing.Printing.PrintDocument
+            $printDialog.Document = $printDoc
+
+            # 设置默认值（从 IPP 请求传递过来的）
+            $printDoc.PrinterSettings.Copies = {copies}
+
+            # 显示打印对话框
+            $result = $printDialog.ShowDialog($form)
+
+            if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{
+                $printer = $printDoc.PrinterSettings.PrinterName
+                $copies = $printDoc.PrinterSettings.Copies
+                
+                Write-Host "Selected printer: $printer"
+                Write-Host "Copies: $copies"
+                
+                # 使用选择的打印机打印文件
+                # 方法1: 使用 WMI 设置默认打印机后打印
+                $wsnet = New-Object -ComObject WScript.Network
+                $originalPrinter = $wsnet.EnumPrinterConnections() | Select-Object -Index 1
+                
+                try {{
+                    $wsnet.SetDefaultPrinter($printer)
+                    
+                    # 现在用默认动词打印
+                    $psi = New-Object System.Diagnostics.ProcessStartInfo
+                    $psi.FileName = "{path}"
+                    $psi.Verb = "Print"
+                    $psi.UseShellExecute = $true
+                    $psi.WindowStyle = 'Hidden'
+                    
+                    $proc = [System.Diagnostics.Process]::Start($psi)
+                    $proc.WaitForExit()
+                    
+                    Write-Host "PRINT_SUCCESS"
+                }} finally {{
+                    # 恢复原来的默认打印机
+                    if ($originalPrinter) {{
+                        $wsnet.SetDefaultPrinter($originalPrinter)
+                    }}
                 }}
-                "#,
-                path_str.replace("\\", "\\\\").replace("\"", "`\"")
-            );
+            }} else {{
+                Write-Host "PRINT_CANCELLED"
+            }}
 
-            let output = Command::new("powershell")
-                .args(&["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-                .output();
+            $form.Close()
+            "#,
+            path = path_str.replace("\\", "\\\\").replace("\"", "`\""),
+            copies = options.copies
+        );
 
-            match output {
+        match Command::new("powershell")
+            .args(&["-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-Command", &ps_script])
+            .creation_flags(CREATE_NO_WINDOW) // CREATE_NO_WINDOW
+            .output()
+        {
                 Ok(out) => {
-                    if out.status.success() {
-                        println!("{}", t!("logs.ipp_print_success_ps"));
-                        return true;
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    if stdout.contains("PRINT_SUCCESS") {
+                        println!("{}", t!("logs.ipp_print_success"));
+                        true
+                    } else if stdout.contains("PRINT_CANCELLED") {
+                        println!("{}", t!("logs.ipp_print_cancelled"));
+                        false
                     } else {
-                        eprintln!("{}", t!("errors.ipp_ps_failed", error = String::from_utf8_lossy(&out.stderr)));
+                        eprintln!("Print dialog error: {}", String::from_utf8_lossy(&out.stderr));
+                        Self::fallback_windows_print(filepath, options)
                     }
                 },
-                Err(e) => eprintln!("{}", t!("errors.ipp_ps_start_failed", error = e.to_string())),
+                Err(e) => {
+                    eprintln!("Failed to start print dialog: {}", e);
+                    Self::fallback_windows_print(filepath, options)
+                }
             }
-
-            Self::fallback_windows_print(filepath, options);
-            return true;
         }
 
         #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -366,17 +433,17 @@ impl IppServer {
         }
     }
 
-    fn fallback_windows_print(filepath: &Path, _options: &PrintOptions) {
+    fn fallback_windows_print(filepath: &Path, _options: &PrintOptions) -> bool {
+        // 最后的降级方案：直接用默认程序打开
         let path_str = filepath.to_string_lossy();
-        println!("{}", t!("logs.ipp_fallback_print_start"));
+        println!("{}", t!("logs.ipp_fallback_open", file = path_str));
         
-        match Command::new("cmd")
+        let _ = Command::new("cmd")
             .args(&["/C", "start", "", &path_str])
-            .spawn()
-        {
-            Ok(_) => println!("{}", t!("logs.ipp_fallback_sent")),
-            Err(e) => eprintln!("{}", t!("errors.ipp_fallback_failed", error = e.to_string())),
-        }
+            .creation_flags(0x08000000)
+            .spawn();
+        
+        true
     }
 
     fn handle_validate_job(request_id: u32) -> Vec<u8> {
