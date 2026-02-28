@@ -1,0 +1,60 @@
+_version: 1
+
+messages:
+  lang_switched: "Backend language switched to: %{locale}"
+  printer_already_shared: "Printer %{id} is already being shared"
+  start_sharing: "Start sharing printer: %{name}"
+  ipp_started: "IPP server started"
+  mdns_error: "mDNS error: %{error}"
+  share_success: "Printer %{id} shared successfully"
+  stop_sharing: "Stop sharing printer: %{id}"
+  printer_not_shared: "Printer %{id} is not shared"
+
+logs:
+  detector_scanning: "Scanning system printers..."
+  detector_found_printer: "Found printer: %{name} | Port: %{port} | Code: %{code} | Status: %{status}"
+  detector_fallback_wmic: "PowerShell failed, using WMIC..."
+  detector_searching_id: "Looking for printer ID: %{id}"
+  detector_available_printers: "Available printers: %{list}"
+  
+  mdns_local_ip: "Local IP: %{ip}"
+  mdns_broadcast_success: "Broadcasted: %{name} at %{ip}:%{port}"
+  mdns_heartbeat_renewing: "Renewing mDNS..."
+  mdns_broadcast_stopped: "mDNS stopped"
+  
+  ipp_server_listening: "IPP listening on: http://%{address}"
+  ipp_temp_dir_usage: "Using temp dir for prints"
+  ipp_request_parsed: "Parsed: Op=%{op}, ID=%{id}"
+  ipp_job_received: "Job #%{id} received (%{size} bytes)"
+  ipp_temp_file_created: "Temp file created: %{path}"
+  ipp_temp_file_cleaned: "Temp file cleaned"
+  ipp_printing_start: "Printing: %{file}"
+  ipp_print_success_ps: "Print success (PS)"
+  ipp_print_success_lp: "Print success (lp)"
+  ipp_fallback_print_start: "Fallback print..."
+  ipp_fallback_sent: "Fallback sent"
+
+errors:
+  printer_not_found: "Printer %{id} not found"
+  mdns_daemon_create_failed: "mDNS daemon failed: %{error}"
+  mdns_get_ip_failed: "Get IP failed: %{error}"
+  mdns_service_info_create_failed: "Service info failed: %{error}"
+  mdns_register_failed: "Register failed: %{error}"
+  ipp_server_start_failed: "IPP start failed: %{error}"
+  ipp_read_body_failed: "Read body failed: %{error}"
+  ipp_packet_too_small: "Packet too small"
+  ipp_read_payload_failed: "Read payload failed: %{error}"
+  ipp_unsupported_operation: "Unsupported op: %{op}"
+  ipp_parse_failed: "Parse failed: %{error}"
+  ipp_write_temp_failed: "Write temp failed: %{error}"
+  ipp_file_missing_before_print: "File missing: %{path}"
+  ipp_cleanup_failed: "Cleanup failed: %{error}"
+  ipp_print_failed_keep_file: "Print failed: %{path}"
+  ipp_ps_failed: "PS failed: %{error}"
+  ipp_ps_start_failed: "PS start failed: %{error}"
+  ipp_lp_failed: "lp failed: %{error}"
+  ipp_lp_start_failed: "lp start failed: %{error}"
+  ipp_fallback_failed: "Fallback failed: %{error}"
+
+mdns:
+  note_content: "Air Printer"

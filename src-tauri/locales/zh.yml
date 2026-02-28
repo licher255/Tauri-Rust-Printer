@@ -1,0 +1,60 @@
+_version: 1
+
+messages:
+  lang_switched: "后端语言已切换至：%{locale}"
+  printer_already_shared: "打印机 %{id} 已经在共享中"
+  start_sharing: "开始共享打印机：%{name}"
+  ipp_started: "IPP 服务器已启动 (打印文件将保存在 ./prints)"
+  stop_sharing: "停止共享打印机：%{id}"
+  printer_not_shared: "打印机 %{id} 未在共享中"
+  share_success: "打印机 %{id} 已共享到网络 (AirPrint)"
+  mdns_error: "mDNS 错误：%{error}"
+
+errors:
+  mdns_daemon_create_failed: "创建 mDNS 守护进程失败：%{error}"
+  mdns_get_ip_failed: "获取本机 IP 失败：%{error}"
+  mdns_service_info_create_failed: "创建服务信息失败：%{error}"
+  mdns_register_failed: "注册 mDNS 服务失败：%{error}"
+
+  ipp_server_start_failed: "IPP 服务器启动失败：%{error}"
+  ipp_read_body_failed: "读取请求体失败：%{error}"
+  ipp_packet_too_small: "数据包太小"
+  ipp_read_payload_failed: "读取 Payload 失败：%{error}"
+  ipp_unsupported_operation: "未支持的操作：%{op}"
+  ipp_parse_failed: "❌ IPP 解析失败：%{error}"
+  ipp_write_temp_failed: "写入临时文件 %{path} 失败：%{error}"
+  ipp_file_missing_before_print: "⚠️ 错误：文件在打印前已消失 %{path}"
+  ipp_cleanup_failed: "⚠️ 清理临时文件 %{path} 失败：%{error}"
+  ipp_print_failed_keep_file: "⚠️ 打印失败，保留文件供调试：%{path}"
+  ipp_ps_failed: "⚠️ PS 执行失败：%{error}"
+  ipp_ps_start_failed: "❌ 无法启动 PowerShell: %{error}"
+  ipp_lp_failed: "⚠️ lp 命令失败：%{error}"
+  ipp_lp_start_failed: "❌ 无法执行 lp: %{error}"
+  ipp_fallback_failed: "❌ 降级命令失败：%{error}"
+
+logs:
+  mdns_local_ip: "本机 IP: %{ip}"
+  mdns_broadcast_success: "IPP Everywhere 服务已广播：%{name} 在 %{ip}:%{port}"
+  mdns_heartbeat_renewing: "正在重新注册 mDNS 服务..."
+  mdns_broadcast_stopped: "mDNS 广播已停止"
+
+  ipp_server_listening: "✅ IPP 服务器监听于：http://%{address}"
+  ipp_temp_dir_usage: "📂 打印文件将使用系统临时目录 (自动清理)"
+  ipp_request_parsed: "📦 解析成功：Op=%{op}, ID=%{id}"
+  ipp_job_received: "🖨️ 收到打印任务 #%{id} (大小：%{size} bytes, 份数：%{copies})"
+  ipp_temp_file_created: "✅ 数据已写入临时文件：%{path}"
+  ipp_temp_file_cleaned: "🧹 临时文件已清理"
+  ipp_printing_start: "🖨️ 正在尝试打印：%{file} (份数:%{copies}, 双面:%{sides})"
+  ipp_print_success_ps: "✅ 打印命令执行成功 (PowerShell)"
+  ipp_print_success_lp: "✅ 打印命令执行成功 (lp)"
+  ipp_fallback_print_start: "🔄 尝试降级打印方案 (cmd start)..."
+  ipp_fallback_sent: "✅ 降级命令已发送 (将打开默认应用)"
+
+  detector_scanning: "正在检测系统打印机..."
+  detector_found_printer: "发现打印机：%{name} | 端口：%{port} | 状态码：%{code} | 状态：%{status}"
+  detector_fallback_wmic: "PowerShell 命令失败，使用备用方案 (WMIC)..."
+  detector_searching_id: "查找打印机 ID: %{id}"
+  detector_available_printers: "可用打印机：%{list}"
+
+mdns:
+  note_content: "Air 打印机"

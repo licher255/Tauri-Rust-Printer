@@ -1,4 +1,5 @@
 import { printerApi, Printer } from "../services/printerService";
+import i18n from '../i18n';
 
 export class PrinterList {
   private container: HTMLElement;
@@ -6,6 +7,12 @@ export class PrinterList {
   private refreshBtn: HTMLButtonElement;
   private printers: Printer[] = [];
   private sharedPrinterIds: Set<string> = new Set();
+  
+  // 定义事件处理函数，以便后续移除监听
+  private handleLanguageChange = () => {
+    this.renderStaticLabels();
+    this.renderList();
+  };
 
   constructor(containerId: string) {
     const container = document.getElementById(containerId);
@@ -17,7 +24,16 @@ export class PrinterList {
     this.refreshBtn = this.container.querySelector("#refresh-btn")!;
 
     this.bindEvents();
-    this.load(); // 自动加载（里面已经调用 loadSharedPrinters）
+    
+    // ✅ 修复：直接绑定，不需要接收返回值
+    i18n.on('languageChanged', this.handleLanguageChange);
+
+    this.load();
+  }
+
+  // ✅ 修复：使用 off 方法移除监听
+  public destroy() {
+    i18n.off('languageChanged', this.handleLanguageChange);
   }
 
   private render() {
@@ -25,18 +41,30 @@ export class PrinterList {
       <div class="card bg-base-100 shadow-xl mb-6">
         <div class="card-body">
           <div class="flex justify-between items-center mb-4">
-            <h2 class="card-title">打印机列表</h2>
+            <h2 id="pl-title" class="card-title">打印机列表</h2>
             <button id="refresh-btn" class="btn btn-primary btn-sm">
               <span class="loading loading-spinner loading-xs hidden" id="loading"></span>
-              刷新
+              <span id="pl-refresh-text">刷新</span>
             </button>
           </div>
           <div id="printer-items" class="space-y-2">
-            <div class="text-gray-500">加载中...</div>
+            <div class="text-gray-500" id="pl-loading-text">加载中...</div>
           </div>
         </div>
       </div>
     `;
+    
+    this.renderStaticLabels();
+  }
+
+  private renderStaticLabels() {
+    const titleEl = document.getElementById('pl-title');
+    const refreshTextEl = document.getElementById('pl-refresh-text');
+    const loadingTextEl = document.getElementById('pl-loading-text');
+
+    if (titleEl) titleEl.textContent = i18n.t('printers.title');
+    if (refreshTextEl) refreshTextEl.textContent = i18n.t('actions.refresh');
+    if (loadingTextEl) loadingTextEl.textContent = i18n.t('common.loading');
   }
 
   private bindEvents() {
@@ -45,8 +73,10 @@ export class PrinterList {
 
   async load() {
     this.setLoading(true);
+    const loadingTextEl = document.getElementById('pl-loading-text');
+    if(loadingTextEl) loadingTextEl.textContent = i18n.t('common.loading');
+
     try {
-      // 同时获取打印机列表和共享状态
       const [printers, shared] = await Promise.all([
         printerApi.getList(),
         printerApi.getSharedList()
@@ -56,7 +86,8 @@ export class PrinterList {
       this.sharedPrinterIds = new Set(shared.map(p => p.id));
       this.renderList();
     } catch (error) {
-      this.listContainer.innerHTML = `<div class="text-error">加载失败: ${error}</div>`;
+      const errorMsg = i18n.t('errors.load_failed', { error: String(error) });
+      this.listContainer.innerHTML = `<div class="text-error">${errorMsg}</div>`;
     } finally {
       this.setLoading(false);
     }
@@ -64,22 +95,25 @@ export class PrinterList {
 
   private renderList() {
     if (this.printers.length === 0) {
-      this.listContainer.innerHTML = '<div class="text-gray-500">未发现打印机</div>';
+      this.listContainer.innerHTML = `<div class="text-gray-500">${i18n.t('printers.no_printers')}</div>`;
       return;
     }
 
     this.listContainer.innerHTML = this.printers.map(p => {
       const statusStr = (p.status || '').toString().toLowerCase();
       const isOnline = statusStr === 'online';
-      const isShared = this.sharedPrinterIds.has(p.id);  // 检查是否已共享
+      const isShared = this.sharedPrinterIds.has(p.id);
       
-      const statusText = isOnline ? '在线' : '离线';
+      const statusKey = isOnline ? 'status.online' : 'status.offline';
+      const statusText = i18n.t(statusKey);
+      
       const badgeClass = isOnline ? 'badge-success' : 'badge-error';
       
-      // 根据共享状态显示不同按钮
+      const shareKey = isShared ? 'actions.stop_sharing' : 'actions.share';
+      const btnText = i18n.t(shareKey);
+      
       const btnClass = isShared ? 'btn-error' : 'btn-primary';
-      const btnText = isShared ? '停止共享' : '共享';
-      const btnDisabled = !isOnline && !isShared;  // 离线且未共享时禁用
+      const btnDisabled = !isOnline && !isShared;
       
       return `
         <div class="flex items-center justify-between p-3 bg-base-200 rounded-lg">
@@ -105,7 +139,6 @@ export class PrinterList {
       `;
     }).join("");
 
-    // 绑定共享按钮事件
     this.listContainer.querySelectorAll(".share-btn").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const target = e.target as HTMLButtonElement;
@@ -116,31 +149,31 @@ export class PrinterList {
     });
   }
 
-  // 修改：处理共享/取消共享
   private async handleShare(printerId: string, isShared: boolean, btn: HTMLButtonElement) {
     btn.disabled = true;
-    btn.textContent = isShared ? "停止中..." : "共享中...";
+    
+    const processingKey = isShared ? 'actions.stopping' : 'actions.sharing';
+    btn.textContent = i18n.t(processingKey);
 
     try {
       if (isShared) {
-        // 取消共享
         await printerApi.unshare(printerId);
         this.sharedPrinterIds.delete(printerId);
-        alert("✅ 已停止共享");
+        alert(`✅ ${i18n.t('messages.stop_success')}`);
       } else {
-        // 开始共享
-        const result = await printerApi.share(printerId);
+        await printerApi.share(printerId);
         this.sharedPrinterIds.add(printerId);
-        alert(`✅ ${result}`);
+        alert(`✅ ${i18n.t('messages.share_success')}`);
       }
       
-      // 重新渲染列表更新按钮状态
       this.renderList();
       
     } catch (error) {
-      alert(`❌ 操作失败: ${error}`);
-      // 恢复原按钮文字
-      btn.textContent = isShared ? "停止共享" : "共享";
+      const errorMsg = i18n.t('errors.operation_failed', { error: String(error) });
+      alert(`❌ ${errorMsg}`);
+      
+      const restoreKey = isShared ? 'actions.stop_sharing' : 'actions.share';
+      btn.textContent = i18n.t(restoreKey);
       btn.disabled = false;
     }
   }
@@ -151,5 +184,10 @@ export class PrinterList {
       spinner.classList.toggle("hidden", !loading);
     }
     this.refreshBtn.disabled = loading;
+    
+    if (loading && this.printers.length === 0) {
+       const loadingTextEl = document.getElementById('pl-loading-text');
+       if(loadingTextEl) loadingTextEl.textContent = i18n.t('common.loading');
+    }
   }
 }

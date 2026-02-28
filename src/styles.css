@@ -1,3 +1,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+body {
+  /* 0.9 表示缩小到 90%，0.8 表示 80%，以此类推 */
+  zoom: 0.8; 
+  
+  /* 可选：防止缩放后出现奇怪的滚动条或留白 */
+  width: 100%;
+  height: 100%;
+  overflow: auto; 
+}

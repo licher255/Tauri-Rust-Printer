@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- title 也可以通过 JS 动态修改，这里先保留默认，JS 会覆盖它 -->
     <title>AirPrinter</title>
   </head>
 
@@ -13,20 +14,26 @@
       <!-- 头部 -->
       <div class="navbar bg-base-100 rounded-box shadow-lg mb-8">
         <div class="flex-1">
-          <span class="text-2xl font-bold text-primary">🖨️ AirPrinter</span>
+          <!-- 添加 data-i18n 属性，key 对应 json 文件中的路径 -->
+          <span id="app-title" class="text-2xl font-bold text-primary" data-i18n="app.title">
+            🖨️ AirPrinter
+          </span>
         </div>
         <div class="flex-none">
-          <select id="lang-select" class="select select-bordered select-sm">
-            <option value="en">English</option>
+          <select id="lang-select" class="select select-bordered select-sm w-full max-w-xs min-w-[120px]">
+            <option value="en" selected>English</option>
             <option value="zh">中文</option>
           </select>
         </div>
       </div>
 
       <!-- 打印机列表（组件挂载点） -->
+      <!-- 如果 PrinterList 组件内部有标题，也建议在组件内处理，或者在这里加一个标题 -->
+      <h2 class="text-xl font-semibold mb-4 mt-8" data-i18n="printers.title">Printers</h2>
       <div id="printer-list-container"></div>
 
       <!-- 日志面板（组件挂载点） -->
+      <h2 class="text-xl font-semibold mb-4 mt-8" data-i18n="logs.title">Logs</h2>
       <div id="log-panel-container"></div>
 
     </div>
