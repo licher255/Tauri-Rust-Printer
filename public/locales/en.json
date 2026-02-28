@@ -1,0 +1,50 @@
+{
+  "printers": {
+    "title": "Printers",
+    "no_printers": "No printers found"
+  },
+  "logs": {
+    "title": "System Logs",
+    "clear": "Clear",
+    "waiting": "Waiting for operations...",
+    "fetching_printers": "Fetching printer list...",
+    "found_printers": "Found {{count}} printers",
+    "sharing_printer": "Sharing printer: {{id}}...",
+    "stopped_sharing": "Stopped sharing: {{id}}"
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "ready": "Ready",
+    "busy": "Busy"
+  },
+  "actions": {
+    "refresh": "Refresh",
+    "share": "Share",
+    "stop_sharing": "Stop Sharing",
+    "sharing": "Sharing...",
+    "stopping": "Stopping..."
+  },
+  "common": {
+    "loading": "Loading...",
+    "cancel": "Cancel",
+    "confirm": "Confirm"
+  },
+  "messages": {
+    "share_success": "Printer shared successfully",
+    "stop_success": "Sharing stopped successfully"
+  },
+  "errors": {
+    "load_failed": "Failed to load printers: {{error}}",
+    "operation_failed": "Operation failed: {{error}}",
+    "fetch_failed": "Failed to fetch list: {{error}}",
+    "share_failed": "Failed to share: {{error}}"
+  },
+  "debug": {
+    "printers_received": "[DEBUG] Received {{count}} printers",
+    "sharing_request": "[DEBUG] Sharing request initiated, ID: {{id}}",
+    "loading_printers": "[DEBUG] Loading printer list...",
+    "starting_share": "[DEBUG] Starting share: {{id}}",
+    "stopping_share": "[DEBUG] Stopping share: {{id}}"
+  }
+}

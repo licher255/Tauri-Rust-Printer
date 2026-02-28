@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "AirPrinter",
-        "width": 700,
-        "height": 850,
+        "width": 600,
+        "height": 780,
         "resizable": true,
         "fullscreen": false
       }

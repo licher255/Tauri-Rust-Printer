@@ -1,5 +1,7 @@
 use crate::models::{Printer, PrinterStatus};
 use std::process::Command;
+// 引入翻译宏
+use rust_i18n::t;
 
 pub struct PrinterDetector;
 
@@ -9,7 +11,8 @@ impl PrinterDetector {
     }
 
     pub fn detect(&self) -> Vec<Printer> {
-        println!("正在检测系统打印机...");
+        // 翻译日志
+        println!("{}", t!("logs.detector_scanning"));
 
         #[cfg(target_os = "windows")]
         return self.detect_windows();
@@ -26,7 +29,6 @@ impl PrinterDetector {
     fn detect_windows(&self) -> Vec<Printer> {
         let mut printers = Vec::new();
 
-        // 使用 PowerShell 命令获取打印机
         let output = Command::new("powershell")
             .args([
                 "-Command",
@@ -48,21 +50,22 @@ impl PrinterDetector {
                     for (i, p) in printer_list.iter().enumerate() {
                         if let Some(name) = p.get("Name").and_then(|v| v.as_str()) {
                             let port = p.get("PortName").and_then(|v| v.as_str()).unwrap_or("Unknown");
-                            
-                            // 获取 Windows 打印机状态码
                             let status_code = p.get("PrinterStatus").and_then(|v| v.as_i64()).unwrap_or(0);
                             
-                            // 判断打印机状态
-                            // 0 = 未知, 1 = 其他, 2 = 未知, 3 = 空闲, 4 = 打印中, 5 = 预热, 
-                            // 6 = 停止打印, 7 = 离线, 8 = 暂停, 9 = 错误
                             let status = if status_code == 7 || status_code == 9 || status_code == 8 {
                                 PrinterStatus::Offline
                             } else {
                                 PrinterStatus::Online
                             };
                             
-                            println!("发现打印机: {} | 端口: {} | 状态码: {} | 状态: {:?}", 
-                                name, port, status_code, status);
+                            // 翻译发现打印机的日志
+                            println!("{}", t!(
+                                "logs.detector_found_printer", 
+                                name = name, 
+                                port = port, 
+                                code = status_code, 
+                                status = format!("{:?}", status)
+                            ));
                             
                             printers.push(Printer {
                                 name: name.to_string(),
@@ -74,7 +77,8 @@ impl PrinterDetector {
                 }
             }
             _ => {
-                println!("PowerShell 命令失败，使用备用方案");
+                // 翻译备用方案日志
+                println!("{}", t!("logs.detector_fallback_wmic"));
                 return self.detect_windows_wmic();
             }
         }
@@ -147,8 +151,11 @@ impl PrinterDetector {
 
     pub fn detect_one(&self, id: &str) -> Option<Printer> {
         let printers = self.detect();
-        println!("查找打印机 ID: {}", id);
-        println!("可用打印机: {:?}", printers.iter().map(|p| &p.id).collect::<Vec<_>>());
+        
+        // 翻译查找日志
+        println!("{}", t!("logs.detector_searching_id", id = id));
+        let ids: Vec<String> = printers.iter().map(|p| p.id.clone()).collect();
+        println!("{}", t!("logs.detector_available_printers", list = format!("{:?}", ids)));
         
         printers.into_iter().find(|p| p.id == id)
     }

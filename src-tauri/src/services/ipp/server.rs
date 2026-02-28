@@ -2,10 +2,9 @@ use tiny_http::{Server, Response, Header};
 use std::thread;
 use std::io::{Read, Cursor, Write};
 use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use std::process::Command;
 use std::time::Duration;
-use std::collections::HashMap;
 
 // 👇 1. 导入 prelude 以获取 FromPrimitive trait
 use ipp::prelude::*;
@@ -15,6 +14,9 @@ use ipp::attribute::IppAttribute;
 use ipp::value::IppValue;
 use ipp::parser::IppParser;
 use ipp::reader::IppReader;
+
+// 引入翻译宏
+use rust_i18n::t;
 
 // 定义一个结构体来存储解析出的打印选项
 #[derive(Debug, Clone)]
@@ -51,14 +53,16 @@ impl IppServer {
         let server = match Server::http(&self.address) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("IPP 服务器启动失败：{}", e);
+                // 使用 t! 宏翻译错误日志
+                eprintln!("{}", t!("errors.ipp_server_start_failed", error = e.to_string()));
                 return;
             }
         };
 
         let server_address = self.address.clone();
-        println!("✅ IPP 服务器监听于：http://{}", self.address);
-        println!("📂 打印文件将使用系统临时目录 (自动清理)");
+        // 翻译启动日志
+        println!("{}", t!("logs.ipp_server_listening", address = self.address));
+        println!("{}", t!("logs.ipp_temp_dir_usage"));
 
         thread::spawn(move || {
             for request in server.incoming_requests() {
@@ -88,12 +92,12 @@ impl IppServer {
         // 读取 Body
         let mut body = Vec::new();
         if let Err(e) = request.as_reader().read_to_end(&mut body) {
-            eprintln!("读取请求体失败：{}", e);
+            eprintln!("{}", t!("errors.ipp_read_body_failed", error = e.to_string()));
             return;
         }
 
         if body.len() < 9 {
-            eprintln!("数据包太小");
+            eprintln!("{}", t!("errors.ipp_packet_too_small"));
             return;
         }
 
@@ -110,17 +114,19 @@ impl IppServer {
                     .map(|o| format!("{:?}", o))
                     .unwrap_or_else(|| format!("Unknown({})", op_code));
                 
-                println!("📦 解析成功：Op={}, ID={}", op_name, request_id);
+                // 日志可以使用翻译，但操作名通常保留英文以便调试
+                println!("{}", t!("logs.ipp_request_parsed", op = op_name, id = request_id));
 
                 // 👇 【关键步骤 1】在消耗 payload 之前，先提取打印属性
                 let print_options = Self::extract_print_options(&ipp_request);
-                println!("⚙️ 打印选项：{:?}", print_options);
+                // 这里可以打印选项日志，如果需要的话
+                // println!("{}", t!("logs.ipp_print_options", options = format!("{:?}", print_options)));
 
                 // 👇 【关键步骤 2】提取 Payload
                 let mut payload_reader = ipp_request.into_payload();
                 let mut document_data = Vec::new();
                 if let Err(e) = payload_reader.read_to_end(&mut document_data) {
-                    eprintln!("读取 Payload 失败：{}", e);
+                    eprintln!("{}", t!("errors.ipp_read_payload_failed", error = e.to_string()));
                 }
 
                 let response_body = match Operation::from_u16(op_code) {
@@ -128,14 +134,13 @@ impl IppServer {
                         Self::handle_get_printer_attributes(request_id, server_address)
                     },
                     Some(Operation::PrintJob) => {
-                        // 传递 options 给处理函数
                         Self::handle_print_job(request_id, server_address, document_data, print_options)
                     },
                     Some(Operation::ValidateJob) => {
                         Self::handle_validate_job(request_id)
                     },
                     _ => {
-                        eprintln!("未支持的操作：{}", op_code);
+                        eprintln!("{}", t!("errors.ipp_unsupported_operation", op = op_code));
                         Self::create_error_response(request_id, StatusCode::ClientErrorBadRequest)
                     }
                 };
@@ -144,7 +149,7 @@ impl IppServer {
                     .with_header(Header::from_bytes(&b"Content-Type"[..], &b"application/ipp"[..]).unwrap()));
             },
             Err(e) => {
-                eprintln!("❌ IPP 解析失败：{:?}", e);
+                eprintln!("{}", t!("errors.ipp_parse_failed", error = format!("{:?}", e)));
                 let err_resp = Self::create_error_response(1, StatusCode::ClientErrorBadRequest);
                 let _ = request.respond(Response::from_data(err_resp)
                     .with_header(Header::from_bytes(&b"Content-Type"[..], &b"application/ipp"[..]).unwrap()));
@@ -152,11 +157,9 @@ impl IppServer {
         }
     }
 
-    // 👇 【新功能】提取打印属性
     fn extract_print_options(req: &IppRequestResponse) -> PrintOptions {
         let mut options = PrintOptions::default();
         
-        // 遍历所有属性组
         for group in req.attributes().groups() {
             for (_, attr) in group.attributes() {
                 match attr.name() {
@@ -193,6 +196,7 @@ impl IppServer {
         let mut response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
         let attrs = response.attributes_mut();
         
+        // 协议属性值保持英文
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-name", IppValue::NameWithoutLanguage("AirPrinter".to_string())));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-make-and-model", IppValue::TextWithoutLanguage("AirPrinter Model A".to_string())));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-state", IppValue::Enum(3)));
@@ -226,65 +230,58 @@ impl IppServer {
         response.to_bytes().to_vec()
     }
 
-    // 👇 【核心修改】手动管理临时文件，解决占用问题
     fn handle_print_job(request_id: u32, server_address: &str, document_data: Vec<u8>, options: PrintOptions) -> Vec<u8> {
-        println!("🖨️ 收到打印任务 #{} (大小: {} bytes, 份数: {})", request_id, document_data.len(), options.copies);
+        // 翻译日志
+        println!("{}", t!("logs.ipp_job_received", id = request_id, size = document_data.len(), copies = options.copies));
 
         if document_data.is_empty() {
             return Self::create_error_response(request_id, StatusCode::ClientErrorBadRequest);
         }
 
-        // 1. 构建临时文件路径 (使用 .pdf 后缀，非隐藏文件)
         let temp_dir = std::env::temp_dir();
         let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
         let filename = format!("airprint_{}_{}.pdf", timestamp, request_id);
         let filepath = temp_dir.join(filename);
 
-        // 2. 显式创建并写入文件
         let write_result = (|| -> std::io::Result<()> {
             let mut file = File::create(&filepath)?;
             file.write_all(&document_data)?;
-            // 👇 关键：显式关闭文件句柄，确保操作系统释放锁
             file.sync_all()?; 
             Ok(())
         })();
 
         if let Err(e) = write_result {
-            eprintln!("❌ 写入临时文件失败：{}", e);
+            eprintln!("{}", t!("errors.ipp_write_temp_failed", error = e.to_string(), path = format!("{:?}", filepath)));
             return Self::create_error_response(request_id, StatusCode::ServerErrorInternalError);
         }
 
-        println!("✅ 数据已写入临时文件：{:?}", filepath);
+        println!("{}", t!("logs.ipp_temp_file_created", path = format!("{:?}", filepath)));
 
-        // 3. 异步打印
         let filepath_clone = filepath.clone();
-        let options_clone = options.clone(); // 如果需要，可以把 options 也传进去
+        let options_clone = options.clone();
         
         thread::spawn(move || {
-            // 稍微等待，确保文件系统索引更新
             thread::sleep(Duration::from_millis(500));
 
             if !filepath_clone.exists() {
-                eprintln!("⚠️ 错误：文件在打印前已消失 {:?}", filepath_clone);
+                eprintln!("{}", t!("errors.ipp_file_missing_before_print", path = format!("{:?}", filepath_clone)));
                 return;
             }
 
             let print_success = Self::print_document(&filepath_clone, &options_clone);
 
             if print_success {
-                // 等待 Spooler 读取完成
                 thread::sleep(Duration::from_secs(3));
                 if let Err(e) = fs::remove_file(&filepath_clone) {
-                    eprintln!("⚠️ 清理临时文件失败：{}", e);
+                    eprintln!("{}", t!("errors.ipp_cleanup_failed", error = e.to_string(), path = format!("{:?}", filepath_clone)));
                 } else {
-                    println!("🧹 临时文件已清理");
+                    println!("{}", t!("logs.ipp_temp_file_cleaned"));
                 }
             } else {
-                eprintln!("⚠️ 打印失败，保留文件供调试：{:?}", filepath_clone);
+                eprintln!("{}", t!("errors.ipp_print_failed_keep_file", path = format!("{:?}", filepath_clone)));
             }
         });
 
-        // 4. 返回成功响应
         let job_uri_str = format!("ipp://{}/jobs/{}", server_address, request_id);
         let version = IppVersion::v2_0();
         let mut response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
@@ -298,16 +295,14 @@ impl IppServer {
         response.to_bytes().to_vec()
     }
 
-    // 👇 【增强版】支持传递打印选项
     fn print_document(filepath: &Path, options: &PrintOptions) -> bool {
-        println!("🖨️ 正在尝试打印：{:?} (份数:{}, 双面:{})", filepath.file_name().unwrap_or_default(), options.copies, options.sides);
+        let file_name = filepath.file_name().unwrap_or_default().to_string_lossy();
+        println!("{}", t!("logs.ipp_printing_start", file = file_name, copies = options.copies, sides = options.sides));
 
         #[cfg(target_os = "windows")]
         {
             let path_str = filepath.to_string_lossy();
             
-            // 构造更稳健的 PowerShell 脚本
-            // 使用 -LiteralPath 防止通配符问题，使用 try-catch 捕获错误
             let ps_script = format!(
                 r#"
                 $path = "{}"
@@ -329,24 +324,21 @@ impl IppServer {
             match output {
                 Ok(out) => {
                     if out.status.success() {
-                        println!("✅ 打印命令执行成功 (PowerShell)");
+                        println!("{}", t!("logs.ipp_print_success_ps"));
                         return true;
                     } else {
-                        eprintln!("⚠️ PS 执行失败：{}", String::from_utf8_lossy(&out.stderr));
-                        // 降级
+                        eprintln!("{}", t!("errors.ipp_ps_failed", error = String::from_utf8_lossy(&out.stderr)));
                     }
                 },
-                Err(e) => eprintln!("❌ 无法启动 PowerShell: {}", e),
+                Err(e) => eprintln!("{}", t!("errors.ipp_ps_start_failed", error = e.to_string())),
             }
 
-            // 降级方案
             Self::fallback_windows_print(filepath, options);
             return true;
         }
 
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            // macOS/Linux 可以使用 lp 命令传递选项
             let mut cmd = Command::new("lp");
             cmd.arg(filepath);
             if options.copies > 1 {
@@ -359,35 +351,31 @@ impl IppServer {
             match cmd.output() {
                 Ok(out) => {
                     if out.status.success() {
-                        println!("✅ 打印命令执行成功 (lp)");
+                        println!("{}", t!("logs.ipp_print_success_lp"));
                         return true;
                     } else {
-                        eprintln!("⚠️ lp 命令失败：{}", String::from_utf8_lossy(&out.stderr));
+                        eprintln!("{}", t!("errors.ipp_lp_failed", error = String::from_utf8_lossy(&out.stderr)));
                         return false;
                     }
                 },
                 Err(e) => {
-                    eprintln!("❌ 无法执行 lp: {}", e);
+                    eprintln!("{}", t!("errors.ipp_lp_start_failed", error = e.to_string()));
                     return false;
                 }
             }
         }
-        
-        false
     }
 
-    fn fallback_windows_print(filepath: &Path, options: &PrintOptions) {
+    fn fallback_windows_print(filepath: &Path, _options: &PrintOptions) {
         let path_str = filepath.to_string_lossy();
-        println!("🔄 尝试降级打印方案 (cmd start)...");
+        println!("{}", t!("logs.ipp_fallback_print_start"));
         
-        // 注意：cmd start 无法直接传递份数和双面参数，只能打开文件
-        // 如果需要高级功能，建议用户安装 SumatraPDF 并配置关联
         match Command::new("cmd")
             .args(&["/C", "start", "", &path_str])
             .spawn()
         {
-            Ok(_) => println!("✅ 降级命令已发送 (将打开默认应用)"),
-            Err(e) => eprintln!("❌ 降级命令失败：{}", e),
+            Ok(_) => println!("{}", t!("logs.ipp_fallback_sent")),
+            Err(e) => eprintln!("{}", t!("errors.ipp_fallback_failed", error = e.to_string())),
         }
     }
 
