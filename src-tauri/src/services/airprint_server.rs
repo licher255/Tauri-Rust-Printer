@@ -32,7 +32,7 @@ impl AirPrintServer {
             let ipp = IppServer::new("0.0.0.0", 631);
             ipp.start();
             self.ipp_server = Some(ipp);
-            println!("IPP 服务器已启动");
+            println!("IPP 服务器已启动 (打印文件将保存在 ./prints)");
         }
         
         // 初始化 mDNS 广播（如果还没有）

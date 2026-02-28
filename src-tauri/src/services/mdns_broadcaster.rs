@@ -41,6 +41,8 @@ impl MdnsBroadcaster {
         
         println!("本机 IP: {}", ip);
         self.service_name = format!("air-{}", printer_name.replace(" ", "-"));
+        self.ip = ip.to_string();  // 👈 保存到结构体
+        self.port = port;          // 👈 保存到结构体
 
         // 完整的 TXT 记录
         let mut txt_records = HashMap::new();
@@ -60,9 +62,15 @@ impl MdnsBroadcaster {
         txt_records.insert("Collate".to_string(), "T".to_string());
         txt_records.insert("kind".to_string(), "document".to_string());
         txt_records.insert("PaperMax".to_string(), "legal-A4".to_string());
+        
+        // 👇 URF 必须与 server.rs 中的 urf-supported 保持一致
         txt_records.insert("URF".to_string(), 
-            "V1.4,CP1,PQ3-4-5,RS300-600,MT1-2-3-4-5,W8,SRGB24,ADOBERGB24,IS1".to_string()
+            "V1.4,CP1,DM1,IS1,W8,RS300,SRGB24,ADOBERGB24".to_string()
         );
+        
+        // 👇 关键：添加 universal 关键字声明支持 IPP Everywhere
+        txt_records.insert("universal".to_string(), "true".to_string());
+        
         txt_records.insert("priority".to_string(), "0".to_string());
         
         // 生成 UUID
@@ -74,7 +82,7 @@ impl MdnsBroadcaster {
         );
         txt_records.insert("UUID".to_string(), uuid);
 
-        // 注册主服务
+        // 👇 只注册一个主服务，不要注册子服务！
         let service_info = ServiceInfo::new(
             "_ipp._tcp.local.",
             &self.service_name,
@@ -87,17 +95,21 @@ impl MdnsBroadcaster {
         self.daemon.register(service_info)
             .map_err(|e| format!("注册 mDNS 服务失败: {}", e))?;
 
-        // 注册 universal 子服务
-        self.register_universal_sub_service(&ip.to_string(), port, txt_records)?;
+        // ❌ 删除 register_universal_sub_service 调用
+        // self.register_universal_sub_service(&ip.to_string(), port, txt_records)?;
 
-        println!("AirPrint 服务已广播: {} 在 {}:{}", self.service_name, ip, port);
+        // 👇 保存到结构体供心跳使用
+        self.txt_records = txt_records;
 
-        // 启动心跳线程：定期重新注册防止过期
+        println!("IPP Everywhere 服务已广播: {} 在 {}:{}", self.service_name, ip, port);
+
+        // 启动心跳线程
         self.start_heartbeat(); 
 
         Ok(())
     }
 
+/* 
     fn register_universal_sub_service(
         &self,
         ip: &str,
@@ -119,50 +131,37 @@ impl MdnsBroadcaster {
         println!("Universal 子服务已注册");
         Ok(())
     }
-
+*/
     fn start_heartbeat(&mut self) {
         self.running.store(true, Ordering::Relaxed);
         let running = self.running.clone();
         let daemon = self.daemon.clone();
         let service_name = self.service_name.clone();
-        let ip = self.ip.clone(); // 从结构体获取
+        let ip = self.ip.clone();
         let port = self.port;
-        let txt_records = self.txt_records.clone(); // 👈 从结构体获取完整的 TXT 记录
+        let txt_records = self.txt_records.clone();
 
         self._heartbeat = Some(thread::spawn(move || {
             let mut count = 0;
             while running.load(Ordering::Relaxed) {
                 thread::sleep(Duration::from_secs(10));
                 count += 1;
-                println!("mDNS 心跳 #{} - 服务: {}", count, service_name);
                 
-                // 每 60 秒重新注册一次
                 if count % 6 == 0 {
                     println!("重新注册 mDNS 服务...");
-                    let _ = daemon.unregister(&format!("{}._ipp._tcp.local.", service_name));
-                    let _ = daemon.unregister(&format!("{}._universal._sub._ipp._tcp.local.", service_name));
                     
-                    // 使用完整的 txt_records 重新注册
+                    // 先注销再注册
+                    let _ = daemon.unregister(&format!("{}._ipp._tcp.local.", service_name));
+                    
                     if let Ok(main_info) = ServiceInfo::new(
                         "_ipp._tcp.local.",
                         &service_name,
                         &format!("{}._ipp._tcp.local.", service_name),
                         &ip,
                         port,
-                        txt_records.clone(), // 👈 这里是关键！
-                    ) {
-                        let _ = daemon.register(main_info);
-                    }
-
-                    if let Ok(univ_info) = ServiceInfo::new(
-                        "_universal._sub._ipp._tcp.local.",
-                        &service_name,
-                        &format!("{}._universal._sub._ipp._tcp.local.", service_name),
-                        &ip,
-                        port,
                         txt_records.clone(),
                     ) {
-                        let _ = daemon.register(univ_info);
+                        let _ = daemon.register(main_info);
                     }
                 }
             }
@@ -172,8 +171,8 @@ impl MdnsBroadcaster {
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         if !self.service_name.is_empty() {
+            // 👇 只注销主服务
             let _ = self.daemon.unregister(&format!("{}._ipp._tcp.local.", self.service_name));
-            let _ = self.daemon.unregister(&format!("{}._universal._sub._ipp._tcp.local.", self.service_name));
             println!("mDNS 广播已停止");
         }
     }
