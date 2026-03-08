@@ -1,0 +1,28 @@
+失败的air-Virtual-AirPrint._ipp._tcp.local.
+IPP (Internet Printing Protocol)
+
+air-Virtual-AirPrint._print._sub._ipp._tcp.local:631
+192.168.6.249:631
+
+adminurl = http://192.168.6.249:631/
+air = none
+Collate = T
+Color = T
+Copies = T
+Duplex = T
+Fax = F
+kind = document
+note = Air 打印机
+PaperMax = legal-A4
+pdl = application/pdf,image/urf,image/jpeg
+priority = 0
+product = (Virtual AirPrint)
+qtotal = 1
+rp = ipp/print
+Scan = F
+txtvers = 1
+ty = Virtual AirPrint
+universal = true
+URF = V1.4,CP1,DM1,IS1,W8,RS300,SRGB24,ADOBERGB24
+UUID = b15525c7-8885-4279-a0a2-2ec669b9f3385
+

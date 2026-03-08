@@ -92,6 +92,7 @@ Windows 防火墙需要放行以下端口：
 
 ```powershell
 # 以管理员身份运行 PowerShell
+ipconfig /flushdns
 
 # 允许 mDNS 入站 (UDP 5353)
 netsh advfirewall firewall add rule name="mDNS AirPrint" dir=in action=allow protocol=udp localport=5353

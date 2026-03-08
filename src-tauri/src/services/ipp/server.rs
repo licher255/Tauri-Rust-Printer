@@ -6,6 +6,32 @@ use std::path::{Path};
 use std::process::Command;
 use std::time::Duration;
 use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
+
+// 获取本地 IP 地址用于 IPP 响应
+fn get_local_ip_for_ipp() -> String {
+    use local_ip_address::local_ip;
+    match local_ip() {
+        Ok(ip) => format!("{}:631", ip),
+        Err(_) => "127.0.0.1:631".to_string(),
+    }
+}
+
+// 全局共享的打印机名称，用于 IPP Get-Printer-Attributes 响应
+lazy_static::lazy_static! {
+    static ref SHARED_PRINTER_NAME: Arc<Mutex<String>> = Arc::new(Mutex::new("AirPrinter".to_string()));
+}
+
+pub fn set_shared_printer_name(name: &str) {
+    if let Ok(mut guard) = SHARED_PRINTER_NAME.lock() {
+        *guard = name.to_string();
+        println!("[IPP] 设置共享打印机名称: {}", name);
+    }
+}
+
+fn get_shared_printer_name() -> String {
+    SHARED_PRINTER_NAME.lock().map(|g| g.clone()).unwrap_or_else(|_| "AirPrinter".to_string())
+}
 
 // 👇 1. 导入 prelude 以获取 FromPrimitive trait
 use ipp::prelude::*;
@@ -109,7 +135,26 @@ impl IppServer {
         Ok(())
     }
 
-    fn handle_request(mut request: tiny_http::Request, server_address: &str) {
+    fn handle_request(mut request: tiny_http::Request, _server_address: &str) {
+        // 【关键修复】提取 Host 头，但如果它是 .local 域名，使用 IP 地址代替
+        let host_header = request.headers().iter()
+            .find(|h| h.field.as_str().to_ascii_lowercase() == "host")
+            .map(|h| h.value.as_str().to_string())
+            .unwrap_or_else(|| "localhost:631".to_string());
+        
+        // 如果 Host 头是 .local 域名（如 air-Printer._ipp._tcp.local:631）
+        // 使用本地 IP 地址代替，因为 iOS 可能无法解析 .local 域名
+        let server_address = if host_header.contains(".local") {
+            // 使用本地 IP 地址代替 .local 域名
+            get_local_ip_for_ipp()
+        } else if host_header.contains(':') {
+            host_header.clone()
+        } else {
+            format!("{}:631", host_header)
+        };
+        
+        println!("[IPP调试] 收到请求: Host头={}, 使用地址={}", host_header, server_address);
+        
         // Content-Type 检查
         let is_ipp = request.headers().iter().any(|h| {
             let field_lower = h.field.as_str().to_ascii_lowercase();
@@ -164,18 +209,21 @@ impl IppServer {
                     eprintln!("{}", t!("errors.ipp_read_payload_failed", error = e.to_string()));
                 }
 
+                // 获取当前共享的打印机名称
+                let printer_name = get_shared_printer_name();
+                
                 let response_body = match Operation::from_u16(op_code) {
                     Some(Operation::GetPrinterAttributes) => {
-                        Self::handle_get_printer_attributes(request_id, server_address)
+                        Self::handle_get_printer_attributes(request_id, &server_address, &printer_name)
                     },
                     Some(Operation::PrintJob) => {
-                        Self::handle_print_job(request_id, server_address, document_data, print_options)
+                        Self::handle_print_job(request_id, &server_address, document_data, print_options)
                     },
                     Some(Operation::ValidateJob) => {
                         Self::handle_validate_job(request_id)
                     },
                     Some(Operation::GetJobs) => {
-                        Self::handle_get_jobs(request_id, server_address)
+                        Self::handle_get_jobs(request_id, &server_address)
                     },
                     Some(Operation::CancelJob) => {
                         Self::handle_cancel_job(request_id)
@@ -231,16 +279,19 @@ impl IppServer {
         options
     }
 
-    fn handle_get_printer_attributes(request_id: u32, server_address: &str) -> Vec<u8> {
+    fn handle_get_printer_attributes(request_id: u32, server_address: &str, _printer_name: &str) -> Vec<u8> {
+        // 使用共享的打印机名称，确保与 mDNS 广播一致
+        let printer_name = get_shared_printer_name();
         let printer_uri_str = format!("ipp://{}/ipp/print", server_address);
         let version = IppVersion::v2_0();
         let mut response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
         let attrs = response.attributes_mut();
         
         // ===== 基础打印机信息 =====
-        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-name", IppValue::NameWithoutLanguage("AirPrinter".to_string())));
-        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-make-and-model", IppValue::TextWithoutLanguage("AirPrinter Model A".to_string())));
-        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-info", IppValue::TextWithoutLanguage("AirPrint Compatible Printer".to_string())));
+        // 使用实际的打印机名称，与 mDNS 服务名保持一致（去掉 air- 前缀）
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-name", IppValue::NameWithoutLanguage(printer_name.to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-make-and-model", IppValue::TextWithoutLanguage(format!("{} (AirPrint)", printer_name))));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-info", IppValue::TextWithoutLanguage(format!("AirPrint Compatible Printer: {}", printer_name))));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-state", IppValue::Enum(3))); // 3 = idle
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-is-accepting-jobs", IppValue::Boolean(true)));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-state-reasons", IppValue::Keyword("none".to_string())));

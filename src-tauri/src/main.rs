@@ -28,6 +28,8 @@ use airprinter::commands::{
     get_shared_printers, 
     unshare_printer, 
     set_language,
+    share_virtual_printer,    // 虚拟打印机分享
+    stop_virtual_printer,     // 停止虚拟打印机分享
     AppState
 };
 
@@ -68,6 +70,8 @@ fn main() {
             get_shared_printers,
             unshare_printer,
             set_language,
+            share_virtual_printer,   // 虚拟打印机分享
+            stop_virtual_printer,    // 停止虚拟打印机分享
         ])
         
         .run(tauri::generate_context!())

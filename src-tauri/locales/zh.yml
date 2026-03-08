@@ -12,6 +12,8 @@ messages:
   ipp_start_failed: "IPP 服务器启动失败：%{error}"
 
 errors:
+  printer_not_found: "未找到打印机：%{id}"
+  
   mdns_daemon_create_failed: "创建 mDNS 守护进程失败：%{error}"
   mdns_get_ip_failed: "获取本机 IP 失败：%{error}"
   mdns_service_info_create_failed: "创建服务信息失败：%{error}"
@@ -58,4 +60,4 @@ logs:
   detector_available_printers: "可用打印机：%{list}"
 
 mdns:
-  note_content: "Air 打印机"
+  note_content: "AirPrint Compatible Printer"

@@ -22,6 +22,7 @@ name = "airprinter"
 version = "0.1.0"
 dependencies = [
  "ipp",
+ "lazy_static",
  "local-ip-address",
  "mdns-sd",
  "rand 0.8.5",

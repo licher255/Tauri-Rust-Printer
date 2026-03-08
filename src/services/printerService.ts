@@ -55,5 +55,23 @@ export const printerApi = {
   async unshare(printerId: string): Promise<void> {
       await invoke("unshare_printer", { printerId });
       logService.add(i18n.t('logs.stopped_sharing', { id: printerId }), "info");
+  },
+
+  // 虚拟打印机 AirPrinter255
+  async shareVirtual(): Promise<string> {
+    logService.add("正在分享虚拟打印机 AirPrinter255...", "info");
+    try {
+      const result = await invoke<string>("share_virtual_printer");
+      logService.add(result, "success");
+      return result;
+    } catch (error) {
+      logService.add(`分享虚拟打印机失败: ${error}`, "error");
+      throw error;
+    }
+  },
+
+  async stopVirtual(): Promise<void> {
+    await invoke("stop_virtual_printer");
+    logService.add("已停止分享 AirPrinter255", "info");
   }
 };

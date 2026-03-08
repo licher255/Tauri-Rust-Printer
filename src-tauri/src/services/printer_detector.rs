@@ -1,5 +1,7 @@
 use crate::models::{Printer, PrinterStatus};
 use std::process::Command;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 // 引入翻译宏
 use rust_i18n::t;
 
@@ -47,7 +49,7 @@ impl PrinterDetector {
                         vec![json_val]
                     };
 
-                    for (i, p) in printer_list.iter().enumerate() {
+                    for (_i, p) in printer_list.iter().enumerate() {
                         if let Some(name) = p.get("Name").and_then(|v| v.as_str()) {
                             let port = p.get("PortName").and_then(|v| v.as_str()).unwrap_or("Unknown");
                             let status_code = p.get("PrinterStatus").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -67,9 +69,19 @@ impl PrinterDetector {
                                 status = format!("{:?}", status)
                             ));
                             
+                            // 生成稳定的 ID（基于打印机名称的哈希，而不是索引）
+                            let mut hasher = DefaultHasher::new();
+                            name.hash(&mut hasher);
+                            let name_hash = hasher.finish() % 10000;
+                            let safe_name = name.replace(" ", "-")
+                                .replace("(", "")
+                                .replace(")", "")
+                                .replace(".", "")
+                                .replace(",", "");
+                            
                             printers.push(Printer {
                                 name: name.to_string(),
-                                id: format!("printer-{}-{}", i, name.replace(" ", "-")),
+                                id: format!("printer-{}-{}", name_hash, &safe_name[..safe_name.len().min(20)]),
                                 status,
                             });
                         }
@@ -97,14 +109,24 @@ impl PrinterDetector {
 
         if let Ok(result) = output {
             let text = String::from_utf8_lossy(&result.stdout);
-            for (i, line) in text.lines().skip(1).enumerate() {
+            for line in text.lines().skip(1) {
                 let parts: Vec<&str> = line.split(',').collect();
                 if parts.len() >= 2 {
                     let name = parts.last().unwrap_or(&"Unknown").trim();
                     if !name.is_empty() && name != "Name" {
+                        // 生成稳定的 ID（与主方案一致）
+                        let mut hasher = DefaultHasher::new();
+                        name.hash(&mut hasher);
+                        let name_hash = hasher.finish() % 10000;
+                        let safe_name = name.replace(" ", "-")
+                            .replace("(", "")
+                            .replace(")", "")
+                            .replace(".", "")
+                            .replace(",", "");
+                        
                         printers.push(Printer {
                             name: name.to_string(),
-                            id: format!("printer-{}", i),
+                            id: format!("printer-{}-{}", name_hash, &safe_name[..safe_name.len().min(20)]),
                             status: PrinterStatus::Online,
                         });
                     }

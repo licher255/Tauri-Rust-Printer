@@ -8,7 +8,6 @@ export class PrinterList {
   private printers: Printer[] = [];
   private sharedPrinterIds: Set<string> = new Set();
   
-  // 定义事件处理函数，以便后续移除监听
   private handleLanguageChange = () => {
     this.renderStaticLabels();
     this.renderList();
@@ -25,13 +24,11 @@ export class PrinterList {
 
     this.bindEvents();
     
-    // ✅ 修复：直接绑定，不需要接收返回值
     i18n.on('languageChanged', this.handleLanguageChange);
 
     this.load();
   }
 
-  // ✅ 修复：使用 off 方法移除监听
   public destroy() {
     i18n.off('languageChanged', this.handleLanguageChange);
   }
@@ -42,11 +39,17 @@ export class PrinterList {
         <div class="card-body">
           <div class="flex justify-between items-center mb-4">
             <h2 id="pl-title" class="card-title">打印机列表</h2>
-            <button id="refresh-btn" class="btn btn-primary btn-sm">
-              <span class="loading loading-spinner loading-xs hidden" id="loading"></span>
-              <span id="pl-refresh-text">刷新</span>
-            </button>
+            <div class="flex gap-2">
+              <button id="virtual-btn" class="btn btn-secondary btn-sm">
+                🖨️ AirPrinter255
+              </button>
+              <button id="refresh-btn" class="btn btn-primary btn-sm">
+                <span class="loading loading-spinner loading-xs hidden" id="loading"></span>
+                <span id="pl-refresh-text">刷新</span>
+              </button>
+            </div>
           </div>
+          <div id="virtual-status" class="mb-2 hidden"></div>
           <div id="printer-items" class="space-y-2">
             <div class="text-gray-500" id="pl-loading-text">加载中...</div>
           </div>
@@ -69,6 +72,48 @@ export class PrinterList {
 
   private bindEvents() {
     this.refreshBtn.addEventListener("click", () => this.load());
+    
+    const virtualBtn = this.container.querySelector("#virtual-btn") as HTMLButtonElement;
+    if (virtualBtn) {
+      virtualBtn.addEventListener("click", () => this.handleVirtualPrinter(virtualBtn));
+    }
+  }
+  
+  private async handleVirtualPrinter(btn: HTMLButtonElement) {
+    const isShared = this.sharedPrinterIds.has("virtual-airprinter255");
+    
+    btn.disabled = true;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<span class="loading loading-spinner loading-xs"></span> ${isShared ? '停止中' : '分享中'}`;
+    
+    try {
+      if (isShared) {
+        await printerApi.stopVirtual();
+        this.sharedPrinterIds.delete("virtual-airprinter255");
+        alert("✅ 已停止 AirPrinter255");
+      } else {
+        await printerApi.shareVirtual();
+        this.sharedPrinterIds.add("virtual-airprinter255");
+        alert("✅ AirPrinter255 已分享");
+      }
+      this.updateVirtualStatus();
+    } catch (error) {
+      alert(`❌ 失败: ${error}`);
+    } finally {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    }
+  }
+  
+  private updateVirtualStatus() {
+    const statusEl = this.container.querySelector("#virtual-status") as HTMLElement;
+    const isShared = this.sharedPrinterIds.has("virtual-airprinter255");
+    if (isShared) {
+      statusEl.innerHTML = `<span class="badge badge-success">AirPrinter255 分享中</span>`;
+      statusEl.classList.remove("hidden");
+    } else {
+      statusEl.classList.add("hidden");
+    }
   }
 
   async load() {
@@ -85,6 +130,7 @@ export class PrinterList {
       this.printers = printers;
       this.sharedPrinterIds = new Set(shared.map(p => p.id));
       this.renderList();
+      this.updateVirtualStatus();
     } catch (error) {
       const errorMsg = i18n.t('errors.load_failed', { error: String(error) });
       this.listContainer.innerHTML = `<div class="text-error">${errorMsg}</div>`;

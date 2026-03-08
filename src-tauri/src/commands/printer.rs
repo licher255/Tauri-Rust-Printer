@@ -50,3 +50,26 @@ pub fn unshare_printer(
     let mut server = state.server.lock().map_err(|e| e.to_string())?;
     server.stop(&printer_id)
 }
+
+/// 分享虚拟打印机 AirPrinter255（用于测试，不需要选择系统打印机）
+#[tauri::command]
+pub fn share_virtual_printer(state: State<AppState>) -> Result<String, String> {
+    use crate::models::{Printer, PrinterStatus};
+    
+    // 创建虚拟打印机对象 - 使用固定的 ID
+    let virtual_printer = Printer {
+        name: "AirPrinter255".to_string(),
+        id: "virtual-airprinter255".to_string(),
+        status: PrinterStatus::Online,
+    };
+    
+    let mut server = state.server.lock().map_err(|e| e.to_string())?;
+    server.share(virtual_printer)
+}
+
+/// 停止分享虚拟打印机
+#[tauri::command]
+pub fn stop_virtual_printer(state: State<AppState>) -> Result<(), String> {
+    let mut server = state.server.lock().map_err(|e| e.to_string())?;
+    server.stop("virtual-airprinter255")
+}
