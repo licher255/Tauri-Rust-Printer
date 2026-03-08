@@ -34,9 +34,15 @@ impl AirPrintServer {
         // 启动 IPP 服务器
         if self.ipp_server.is_none() {
             let ipp = IppServer::new("0.0.0.0", 631);
-            ipp.start();
-            self.ipp_server = Some(ipp);
-            println!("{}", t!("messages.ipp_started"));
+            match ipp.start() {
+                Ok(()) => {
+                    self.ipp_server = Some(ipp);
+                    println!("{}", t!("messages.ipp_started"));
+                }
+                Err(e) => {
+                    return Err(t!("messages.ipp_start_failed", error = e).to_string());
+                }
+            }
         }
         
         // 初始化 mDNS 广播

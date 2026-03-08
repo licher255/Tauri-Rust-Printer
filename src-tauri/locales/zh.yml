@@ -9,6 +9,7 @@ messages:
   printer_not_shared: "打印机 %{id} 未在共享中"
   share_success: "打印机 %{id} 已共享到网络 (AirPrint)"
   mdns_error: "mDNS 错误：%{error}"
+  ipp_start_failed: "IPP 服务器启动失败：%{error}"
 
 errors:
   mdns_daemon_create_failed: "创建 mDNS 守护进程失败：%{error}"

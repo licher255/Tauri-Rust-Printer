@@ -2,7 +2,37 @@ import "./styles.css";
 import i18n from "./i18n";
 import { PrinterList } from "./components/PrinterList";
 import { LogPanel } from "./components/LogPanel";
-import { invoke } from "@tauri-apps/api/core"; // 确保已导入
+import { invoke } from "@tauri-apps/api/core";
+
+/**
+ * ============================================================================
+ * AirPrinter 初始化注意事项
+ * ============================================================================
+ * 
+ * 1. 网络环境
+ *    - 手机和电脑必须在同一 Wi-Fi 网络下
+ *    - 路由器不能开启 "AP隔离" / "客户端隔离"
+ * 
+ * 2. 防火墙设置（Windows）
+ *    以管理员身份运行 PowerShell 执行：
+ *    
+ *    netsh advfirewall firewall add rule name="mDNS AirPrint" dir=in action=allow protocol=udp localport=5353
+ *    netsh advfirewall firewall add rule name="IPP Server" dir=in action=allow protocol=tcp localport=631
+ * 
+ * 3. AirPrint 服务发现
+ *    本应用注册 3 个 mDNS 服务（必须使用相同实例名称）：
+ *    - _ipp._tcp (端口 631)
+ *    - _printer._tcp (端口 0, RFC 6763)
+ *    - _print._sub._ipp._tcp (端口 631, IPP Everywhere™)
+ * 
+ * 4. 故障排除
+ *    - Discovery App 能发现但 iOS 系统打印无法发现：
+ *      检查是否包含 ipp-features-supported = ipp-everywhere
+ *    - 完全无法发现：检查防火墙和路由器 AP 隔离设置
+ * 
+ * 参考文档：README.md 中的 "使用注意事项" 章节
+ * ============================================================================
+ */
 
 /**
  * 更新页面上所有标记了 data-i18n 的元素
@@ -24,9 +54,8 @@ const updatePageTranslations = () => {
   }
 };
 
-// 👇 新增：专门用于同步语言到后端的函数
+// 专门用于同步语言到后端的函数
 const syncLanguageToBackend = async (lang: string) => {
-  // 👇 防御性检查：如果 lang 为空，默认为 'en'
   if (!lang || lang.trim() === '') {
     console.warn('⚠️ Language is empty, defaulting to "en"');
     lang = 'en';
@@ -40,6 +69,20 @@ const syncLanguageToBackend = async (lang: string) => {
   }
 };
 
+// 打印初始化提示信息
+const printInitNotes = () => {
+  console.log('%c🖨️ AirPrinter 初始化完成', 'color: #4CAF50; font-size: 16px; font-weight: bold;');
+  console.log('%c═══════════════════════════════════════════════════════════', 'color: #2196F3;');
+  console.log('%c使用注意事项：', 'color: #FF9800; font-weight: bold;');
+  console.log('  1. 确保手机和电脑在同一 Wi-Fi 网络下');
+  console.log('  2. 检查 Windows 防火墙是否放行 UDP 5353 和 TCP 631');
+  console.log('  3. 路由器不能开启 "AP隔离" / "客户端隔离"');
+  console.log('  4. 共享打印机后，iOS 应在 5-10 秒内发现打印机');
+  console.log('%c═══════════════════════════════════════════════════════════', 'color: #2196F3;');
+  console.log('详细文档请查看 README.md 中的 "使用注意事项" 章节');
+  console.log('故障排查指南: https://github.com/yourusername/airprinter#故障排除');
+};
+
 document.addEventListener("DOMContentLoaded", async () => {
   if (!i18n.isInitialized) {
     await new Promise<void>((resolve) => {
@@ -51,10 +94,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   new LogPanel("log-panel-container");
   updatePageTranslations();
 
+  // 打印初始化提示
+  printInitNotes();
+
   const langSelect = document.getElementById("lang-select") as HTMLSelectElement;
   
   if (langSelect) {
-    // 👇 确保初始值不为空
     const currentLang = i18n.language || 'en';
     langSelect.value = currentLang; 
 
@@ -68,7 +113,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     langSelect.addEventListener("change", async (e) => {
       const newLang = (e.target as HTMLSelectElement).value;
         
-        // 👇 再次检查
       if (!newLang) return; 
 
       try {
@@ -86,8 +130,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   i18n.on('languageChanged', (lng) => {
     if (langSelect) langSelect.value = lng;
     updatePageTranslations();
-    // 👇 如果是通过代码触发的变化，也需要同步后端
-    // 注意避免死循环，通常上面的 change 事件已经处理了用户交互
-    // 这里可以加一个标志位，或者确信只有用户操作才会触发 change 事件
   });
 });

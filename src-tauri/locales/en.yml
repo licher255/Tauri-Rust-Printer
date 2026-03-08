@@ -6,6 +6,7 @@ messages:
   start_sharing: "Start sharing printer: %{name}"
   ipp_started: "IPP server started"
   mdns_error: "mDNS error: %{error}"
+  ipp_start_failed: "IPP server start failed: %{error}"
   share_success: "Printer %{id} shared successfully"
   stop_sharing: "Stop sharing printer: %{id}"
   printer_not_shared: "Printer %{id} is not shared"

@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::path::{Path};
 use std::process::Command;
 use std::time::Duration;
+use std::net::TcpListener;
 
 // 👇 1. 导入 prelude 以获取 FromPrimitive trait
 use ipp::prelude::*;
@@ -53,14 +54,41 @@ impl IppServer {
             address: format!("{}:{}", bind_address, port),
         }
     }
+    
+    /// 检查端口是否被占用
+    fn check_port_available(address: &str) -> Result<(), String> {
+        // 尝试绑定到该端口，如果成功说明端口可用，失败说明被占用
+        match TcpListener::bind(address) {
+            Ok(listener) => {
+                // 立即释放端口
+                drop(listener);
+                Ok(())
+            }
+            Err(e) => {
+                Err(format!("端口 {} 已被占用或无法绑定: {}", address, e))
+            }
+        }
+    }
 
-    pub fn start(&self) {
+    pub fn start(&self) -> Result<(), String> {
+        // 首先检查端口是否可用
+        if let Err(e) = Self::check_port_available(&self.address) {
+            let err_msg = format!(
+                "IPP 服务器启动失败: {}。请检查：\n\
+                 1. 是否以管理员身份运行（端口631需要管理员权限）\n\
+                 2. 端口是否被其他程序占用",
+                e
+            );
+            eprintln!("[IPP错误] {}", err_msg);
+            return Err(err_msg);
+        }
+        
         let server = match Server::http(&self.address) {
             Ok(s) => s,
             Err(e) => {
-                // 使用 t! 宏翻译错误日志
-                eprintln!("{}", t!("errors.ipp_server_start_failed", error = e.to_string()));
-                return;
+                let err_msg = t!("errors.ipp_server_start_failed", error = e.to_string()).to_string();
+                eprintln!("{}", err_msg);
+                return Err(err_msg);
             }
         };
 
@@ -77,6 +105,8 @@ impl IppServer {
                 });
             }
         });
+        
+        Ok(())
     }
 
     fn handle_request(mut request: tiny_http::Request, server_address: &str) {
@@ -144,6 +174,12 @@ impl IppServer {
                     Some(Operation::ValidateJob) => {
                         Self::handle_validate_job(request_id)
                     },
+                    Some(Operation::GetJobs) => {
+                        Self::handle_get_jobs(request_id, server_address)
+                    },
+                    Some(Operation::CancelJob) => {
+                        Self::handle_cancel_job(request_id)
+                    },
                     _ => {
                         eprintln!("{}", t!("errors.ipp_unsupported_operation", op = op_code));
                         Self::create_error_response(request_id, StatusCode::ClientErrorBadRequest)
@@ -201,20 +237,45 @@ impl IppServer {
         let mut response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
         let attrs = response.attributes_mut();
         
-        // 协议属性值保持英文
+        // ===== 基础打印机信息 =====
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-name", IppValue::NameWithoutLanguage("AirPrinter".to_string())));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-make-and-model", IppValue::TextWithoutLanguage("AirPrinter Model A".to_string())));
-        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-state", IppValue::Enum(3)));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-info", IppValue::TextWithoutLanguage("AirPrint Compatible Printer".to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-state", IppValue::Enum(3))); // 3 = idle
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-is-accepting-jobs", IppValue::Boolean(true)));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-state-reasons", IppValue::Keyword("none".to_string())));
-        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-uri-supported", IppValue::Uri(printer_uri_str)));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-up-time", IppValue::Integer(3600))); // 正常运行时间
         
+        // ===== URI 支持 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-uri-supported", IppValue::Array(vec![
+            IppValue::Uri(printer_uri_str.clone()),
+        ])));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("uri-authentication-supported", IppValue::Array(vec![
+            IppValue::Keyword("none".to_string()),
+        ])));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("uri-security-supported", IppValue::Array(vec![
+            IppValue::Keyword("none".to_string()),
+        ])));
+        
+        // ===== IPP 版本和特性 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("ipp-versions-supported", IppValue::Array(vec![
+            IppValue::Keyword("1.1".to_string()),
+            IppValue::Keyword("2.0".to_string()),
+        ])));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("ipp-features-supported", IppValue::Array(vec![
+            IppValue::Keyword("ipp-everywhere".to_string()),  // 关键：声明支持 IPP Everywhere
+        ])));
+        
+        // ===== 操作支持 =====
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("operations-supported", IppValue::Array(vec![
             IppValue::Enum(Operation::PrintJob as i32),
             IppValue::Enum(Operation::GetPrinterAttributes as i32),
             IppValue::Enum(Operation::ValidateJob as i32),
+            IppValue::Enum(Operation::GetJobs as i32),
+            IppValue::Enum(Operation::CancelJob as i32),
         ])));
         
+        // ===== 文档格式 =====
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("document-format-supported", IppValue::Array(vec![
             IppValue::MimeMediaType("application/pdf".to_string()),
             IppValue::MimeMediaType("image/urf".to_string()),
@@ -222,14 +283,91 @@ impl IppServer {
         ])));
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("document-format-default", IppValue::MimeMediaType("application/pdf".to_string())));
         
+        // ===== 纸张/介质支持 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("media-default", IppValue::Keyword("iso_a4_210x297mm".to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("media-supported", IppValue::Array(vec![
+            IppValue::Keyword("iso_a4_210x297mm".to_string()),
+            IppValue::Keyword("iso_a5_148x210mm".to_string()),
+            IppValue::Keyword("na_letter_8.5x11in".to_string()),
+            IppValue::Keyword("na_legal_8.5x14in".to_string()),
+        ])));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("media-ready", IppValue::Array(vec![
+            IppValue::Keyword("iso_a4_210x297mm".to_string()),
+        ])));
+        
+        // ===== 单双面打印 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("sides-default", IppValue::Keyword("one-sided".to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("sides-supported", IppValue::Array(vec![
+            IppValue::Keyword("one-sided".to_string()),
+            IppValue::Keyword("two-sided-long-edge".to_string()),
+            IppValue::Keyword("two-sided-short-edge".to_string()),
+        ])));
+        
+        // ===== 打印份数 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("copies-default", IppValue::Integer(1)));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("copies-supported", IppValue::RangeOfInteger { min: 1, max: 99 }));
+        
+        // ===== 彩色/灰度 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("print-color-mode-default", IppValue::Keyword("color".to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("print-color-mode-supported", IppValue::Array(vec![
+            IppValue::Keyword("color".to_string()),
+            IppValue::Keyword("monochrome".to_string()),
+        ])));
+        
+        // ===== URF 支持 (AirPrint 必需) =====
         attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("urf-supported", IppValue::Array(vec![
             IppValue::Keyword("V1.4".to_string()),
             IppValue::Keyword("CP1".to_string()),
             IppValue::Keyword("DM1".to_string()),
             IppValue::Keyword("IS1".to_string()),
+            IppValue::Keyword("MT1".to_string()),  // 介质类型支持
+            IppValue::Keyword("MT2".to_string()),
             IppValue::Keyword("W8".to_string()),
             IppValue::Keyword("RS300".to_string()),
             IppValue::Keyword("SRGB24".to_string()),
+            IppValue::Keyword("ADOBERGB24".to_string()),
+        ])));
+        
+        // ===== 打印机设备 ID (RFC 2911) =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-device-id", 
+            IppValue::TextWithoutLanguage("MFG:Generic;MDL:AirPrinter;CMD:PDF,URF;CLS:PRINTER;DES:Generic AirPrint Compatible Printer;".to_string())));
+        
+        // ===== PDL 覆盖支持 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("pdl-override-supported", IppValue::Keyword("not-attempted".to_string())));
+        
+        // ===== 参考 URI 方案 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("reference-uri-schemes-supported", IppValue::Array(vec![
+            IppValue::UriScheme("http".to_string()),
+            IppValue::UriScheme("https".to_string()),
+            IppValue::UriScheme("ftp".to_string()),
+        ])));
+        
+        // ===== 多文档处理 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("multiple-document-jobs-supported", IppValue::Boolean(false)));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("multiple-operation-time-out", IppValue::Integer(60)));
+        
+        // ===== 作业优先级 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("job-priority-default", IppValue::Integer(50)));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("job-priority-supported", IppValue::RangeOfInteger { min: 1, max: 100 }));
+        
+        // ===== 字符集和语言 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("charset-configured", IppValue::Charset("utf-8".to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("charset-supported", IppValue::Array(vec![
+            IppValue::Charset("utf-8".to_string()),
+        ])));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("natural-language-configured", IppValue::NaturalLanguage("en".to_string())));
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("generated-natural-language-supported", IppValue::Array(vec![
+            IppValue::NaturalLanguage("en".to_string()),
+        ])));
+        
+        // ===== 压缩支持 =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("compression-supported", IppValue::Array(vec![
+            IppValue::Keyword("none".to_string()),
+        ])));
+        
+        // ===== 打印机 kind (IPP Everywhere) =====
+        attrs.add(DelimiterTag::PrinterAttributes, IppAttribute::new("printer-kind", IppValue::Array(vec![
+            IppValue::Keyword("document".to_string()),
         ])));
 
         response.to_bytes().to_vec()
@@ -449,6 +587,27 @@ fn print_document(filepath: &Path, options: &PrintOptions) -> bool {
     fn handle_validate_job(request_id: u32) -> Vec<u8> {
         let version = IppVersion::v2_0();
         let response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
+        response.to_bytes().to_vec()
+    }
+
+    fn handle_get_jobs(request_id: u32, _server_address: &str) -> Vec<u8> {
+        // 返回空作业列表（简化实现）
+        let version = IppVersion::v2_0();
+        let mut response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
+        let _attrs = response.attributes_mut();
+        
+        // 没有作业，直接返回成功响应
+        // 实际应用应该查询当前的打印作业列表
+        println!("[IPP] GetJobs 请求 - 返回空作业列表");
+        
+        response.to_bytes().to_vec()
+    }
+
+    fn handle_cancel_job(request_id: u32) -> Vec<u8> {
+        // 简化实现：返回成功（即使作业不存在或已完成）
+        let version = IppVersion::v2_0();
+        let response = IppRequestResponse::new_response(version, StatusCode::SuccessfulOk, request_id);
+        println!("[IPP] CancelJob 请求 - 已接受");
         response.to_bytes().to_vec()
     }
 
