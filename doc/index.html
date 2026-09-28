@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="description" content="AirPrinter 项目文档：把 Windows 打印队列发布到局域网，并通过 DNS-SD 与 IPP 接收 Apple 设备的打印作业。">
+    <title>AirPrinter · 项目文档</title>
+    <style>
+      :root {
+        font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+        color: #182831;
+        background: #f5f7f5;
+        line-height: 1.65;
+        font-synthesis: none;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body { margin: 0; }
+      a { color: #086a75; text-underline-offset: 3px; }
+      a:hover { color: #064e57; }
+      :focus-visible { outline: 3px solid #ef8d4a; outline-offset: 3px; }
+      .skip-link { position: absolute; left: 12px; top: -60px; z-index: 10; padding: 8px 14px; background: #fff; }
+      .skip-link:focus { top: 12px; }
+      .layout { width: min(100% - 40px, 1280px); margin: 0 auto; display: grid; grid-template-columns: 242px minmax(0, 1fr); gap: 44px; }
+      aside { position: sticky; top: 0; align-self: start; height: 100vh; display: flex; flex-direction: column; padding: 34px 0 24px; }
+      .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: #14252b; font-size: 1.16rem; font-weight: 800; letter-spacing: -.02em; }
+      .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: #0b6872; color: white; font-size: 1.15rem; }
+      .brand small { display: block; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 750; color: #52666a; line-height: 1.3; }
+      .nav-caption { margin: 42px 0 12px; padding-left: 13px; font-size: .67rem; font-weight: 800; letter-spacing: .14em; color: #52676b; }
+      nav { display: flex; flex-direction: column; gap: 3px; }
+      nav a { padding: 8px 12px; border-radius: 9px; color: #496068; font-size: .89rem; font-weight: 650; text-decoration: none; }
+      nav a:hover, nav a:focus-visible { background: #e3eeeb; color: #0d5860; }
+      .aside-end { margin-top: auto; border-top: 1px solid #dce5e1; padding: 17px 12px 0; color: #55686b; font-size: .75rem; }
+      main { min-width: 0; padding: 28px 0 100px; }
+      .eyebrow { margin: 0 0 11px; color: #0f7981; font-size: .73rem; font-weight: 850; letter-spacing: .16em; text-transform: uppercase; }
+      h1, h2, h3 { letter-spacing: -.035em; line-height: 1.25; }
+      h1 { margin: 0 0 16px; font-size: clamp(2.45rem, 4vw, 4rem); }
+      h2 { margin: 0 0 18px; font-size: clamp(1.58rem, 2.4vw, 2.1rem); }
+      h3 { margin: 0 0 8px; font-size: 1.04rem; }
+      p { margin: 0 0 16px; }
+      .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 26px; min-height: 290px; padding: 41px 42px; border-radius: 22px; background: linear-gradient(125deg, #e5f3ee 0%, #f7f8ed 64%, #fcebdc 100%); border: 1px solid #dce9e3; }
+      .hero::after { content: ""; position: absolute; width: 420px; height: 420px; right: -180px; top: -230px; border: 1px solid rgba(13, 104, 114, .16); border-radius: 50%; box-shadow: 0 0 0 60px rgba(13, 104, 114, .035), 0 0 0 120px rgba(13, 104, 114, .025); }
+      .hero p.lead { max-width: 620px; margin: 0; color: #415a60; font-size: 1.06rem; }
+      .hero-illustration { position: relative; z-index: 1; align-self: center; justify-self: center; width: 150px; height: 166px; }
+      .paper { position: absolute; left: 27px; top: 0; width: 100px; height: 130px; border-radius: 7px; background: white; border: 1px solid #b6d4cd; box-shadow: 0 12px 34px #2c6e6840; transform: rotate(-8deg); }
+      .paper::before { content: ""; position: absolute; top: 30px; left: 17px; width: 65px; height: 43px; border-radius: 5px; background: linear-gradient(135deg, #0b7480, #8cc8b8); }
+      .paper::after { content: ""; position: absolute; top: 85px; left: 17px; width: 56px; height: 23px; border-top: 4px solid #c4d9d4; border-bottom: 4px solid #c4d9d4; }
+      .printer-shape { position: absolute; left: 4px; right: 4px; bottom: 0; height: 72px; border-radius: 12px; background: #153f46; box-shadow: 0 9px 22px #123e463b; }
+      .printer-shape::before { content: ""; position: absolute; left: 18px; right: 18px; bottom: 0; height: 26px; background: #edf8f4; border-radius: 4px 4px 10px 10px; }
+      .printer-shape::after { content: ""; position: absolute; top: 17px; right: 21px; width: 9px; height: 9px; background: #6dddac; border-radius: 50%; }
+      .status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0 0; }
+      .status-card { padding: 17px 19px; border-radius: 13px; background: #fff; border: 1px solid #e1e9e5; }
+      .status-card strong { display: block; margin: 0 0 3px; color: #183b40; font-size: .9rem; }
+      .status-card span { display: block; color: #65777b; font-size: .78rem; }
+      section.content { scroll-margin-top: 28px; padding-top: 58px; }
+      .section-kicker { display: inline-block; margin-bottom: 10px; color: #99501f; font-size: .73rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+      .intro { max-width: 810px; color: #576b70; }
+      .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .card { padding: 23px; border: 1px solid #e1e8e4; border-radius: 15px; background: #fff; box-shadow: 0 8px 24px #1c4f4c08; }
+      .card p { color: #576970; font-size: .88rem; margin-bottom: 0; }
+      .card .number { display: inline-grid; place-items: center; width: 27px; height: 27px; margin-bottom: 18px; border-radius: 7px; color: #06616b; background: #def1eb; font: 800 .8rem/1 system-ui, sans-serif; }
+      .callout { margin: 20px 0; padding: 18px 22px; border-left: 4px solid #0a7180; border-radius: 0 11px 11px 0; background: #e8f2ef; color: #294a50; }
+      .callout.warning { border-color: #d48242; background: #fff3e7; color: #6c4b32; }
+      .callout p:last-child { margin-bottom: 0; }
+      .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 21px 0 14px; }
+      .flow-step { position: relative; min-height: 115px; padding: 17px 14px; border: 1px solid #dbe7e2; border-radius: 13px; background: #fff; }
+      .flow-step:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: 37px; right: -15px; color: #0c7980; font-weight: 900; background: #f5f7f5; width: 18px; text-align: center; }
+      .flow-step .step-number { display: block; margin-bottom: 11px; color: #99501f; font-size: .7rem; font-weight: 800; }
+      .flow-step strong { display: block; font-size: .85rem; line-height: 1.35; }
+      .flow-step small { display: block; margin-top: 5px; color: #586b70; font-size: .71rem; }
+      .table-wrap { overflow-x: auto; border: 1px solid #dfe8e4; border-radius: 13px; background: #fff; }
+      table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+      th { background: #ecf3f0; text-align: left; color: #466065; font-size: .73rem; letter-spacing: .035em; }
+      th, td { padding: 12px 15px; border-bottom: 1px solid #ebefed; vertical-align: top; }
+      tr:last-child td { border-bottom: 0; }
+      td:first-child { font-weight: 700; white-space: nowrap; }
+      td code, p code, li code { padding: .1em .33em; border-radius: 4px; background: #e8efec; color: #1f5260; font-size: .88em; }
+      pre { overflow-x: auto; margin: 0 0 17px; padding: 18px 21px; border-radius: 11px; background: #16292e; color: #eaf6f2; font: .8rem/1.7 Consolas, "Cascadia Code", monospace; }
+      pre code { background: transparent; color: inherit; }
+      .code-label { margin: 24px 0 7px; font-size: .74rem; font-weight: 800; color: #526b71; }
+      .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      ul, ol { padding-left: 1.35em; }
+      li { margin: 7px 0; }
+      .muted { color: #51686d; font-size: .86rem; }
+      .links { display: flex; flex-wrap: wrap; gap: 9px; }
+      .links a { display: inline-block; padding: 8px 12px; border: 1px solid #cddfdb; border-radius: 8px; background: #fff; font-size: .8rem; font-weight: 680; text-decoration: none; }
+      footer { margin-top: 66px; padding: 22px 0 0; border-top: 1px solid #dce5e1; color: #52686c; font-size: .78rem; }
+      @media (max-width: 1030px) { .layout { gap: 22px; grid-template-columns: 200px minmax(0, 1fr); } .flow { grid-template-columns: repeat(3, 1fr); } .flow-step:nth-child(3)::after { display: none; } }
+      @media (max-width: 760px) {
+        .layout { display: block; width: min(100% - 26px, 650px); }
+        aside { position: relative; height: auto; display: block; padding: 16px 0 0; }
+        .brand { margin-bottom: 14px; }
+        .nav-caption, .aside-end { display: none; }
+        nav { display: flex; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 8px; scrollbar-width: thin; }
+        nav a { flex: 0 0 auto; padding: 7px 9px; font-size: .8rem; }
+        main { padding: 13px 0 65px; }
+        .hero { grid-template-columns: 1fr; min-height: 0; padding: 30px 27px; }
+        .hero-illustration { display: none; }
+        .status-grid, .card-grid, .split { grid-template-columns: 1fr; }
+        .flow { grid-template-columns: 1fr 1fr; }
+        .flow-step::after { display: none; }
+        section.content { padding-top: 48px; }
+      }
+      @media (max-width: 420px) { .flow { grid-template-columns: 1fr; } .hero { padding: 27px 21px; } }
+      @media print {
+        :root { background: white; }
+        .layout { display: block; width: 100%; }
+        aside, .skip-link { display: none; }
+        main { padding: 0; }
+        .hero, .card, .status-card, .table-wrap { box-shadow: none; break-inside: avoid; }
+        section.content { padding-top: 22px; }
+        a { color: inherit; }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到正文</a>
+    <div class="layout">
+      <aside aria-label="文档导航">
+        <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">▤</span><span>AirPrinter<small>Project documentation</small></span></a>
+        <p class="nav-caption">项目文档 · V0.1.0</p>
+        <nav aria-label="章节">
+          <a href="#overview">项目概览</a>
+          <a href="#quickstart">快速开始</a>
+          <a href="#architecture">工作原理</a>
+          <a href="#protocol">协议与格式</a>
+          <a href="#network">网络与安全</a>
+          <a href="#development">开发与构建</a>
+          <a href="#testing">验证与边界</a>
+          <a href="#files">源码入口</a>
+        </nav>
+        <div class="aside-end">基于当前代码与审核记录<br>更新于 2026-09-23</div>
+      </aside>
+
+      <main id="main">
+        <header class="hero" id="top">
+          <div>
+            <p class="eyebrow">Windows → Local network → Apple devices</p>
+            <h1>AirPrinter</h1>
+            <p class="lead">让 Windows 已安装的 USB、有线网络或已配对打印队列，通过局域网被发现，并使用标准 DNS-SD 与 IPP 接收打印作业。</p>
+          </div>
+          <div class="hero-illustration" aria-hidden="true"><div class="paper"></div><div class="printer-shape"></div></div>
+        </header>
+        <div class="status-grid" aria-label="当前项目状态">
+          <div class="status-card"><strong>协议链路已实现</strong><span>DNS-SD 发现 · IPP 接收 · Windows 队列投递</span></div>
+          <div class="status-card"><strong>本地模拟已通过</strong><span>17 项后端测试及虚拟 PDF 输出</span></div>
+          <div class="status-card"><strong>实机验收待完成</strong><span>Apple 系统发现与实体出纸尚未验证</span></div>
+        </div>
+
+        <section class="content" id="overview" aria-labelledby="overview-heading">
+          <span class="section-kicker">01 / Overview</span><h2 id="overview-heading">项目概览</h2>
+          <p class="intro">AirPrinter 是面向 Windows 10/11 的 Tauri 桌面程序。它读取 Windows 打印队列与驱动能力，将用户选择的队列发布为局域网打印服务；Apple 客户端通过 mDNS 找到入口后，使用 IPP/HTTP 发送文档，最后由 Windows 驱动处理页面并送入指定队列。</p>
+          <div class="card-grid">
+            <div class="card"><span class="number">01</span><h3>一台电脑，多台队列</h3><p>每台已共享打印机有独立的 DNS-SD 记录和 IPP 资源路径。作业按路径送入对应 Windows 队列，不切换系统默认打印机。</p></div>
+            <div class="card"><span class="number">02</span><h3>选过一次，重新连接可恢复</h3><p>共享选择保存在用户配置目录。程序每 30 秒检查队列；暂时离线时撤回广播，重新可用后恢复。</p></div>
+          </div>
+        </section>
+
+        <section class="content" id="quickstart" aria-labelledby="quickstart-heading">
+          <span class="section-kicker">02 / Use it</span><h2 id="quickstart-heading">快速开始</h2>
+          <div class="card-grid">
+            <div class="card"><span class="number">1</span><h3>准备 Windows 打印机</h3><p>安装打印机驱动，确认 PC 本地测试页可以正常输出。USB、网络和已配对队列均可使用；PDF、XPS、OneNote、Fax 等交互式虚拟目的地不会作为实体打印机显示。</p></div>
+            <div class="card"><span class="number">2</span><h3>启动并选择共享</h3><p>在程序列表中选择真实队列，点击“共享”。如 Windows 防火墙阻止访问，可点击“允许局域网访问”，按系统提示授权。</p></div>
+            <div class="card"><span class="number">3</span><h3>连接同一局域网</h3><p>PC 可通过网线接路由器，iPhone、iPad、Mac 可用 Wi-Fi。两侧必须能互通；访客网络与 AP 隔离会阻止发现。</p></div>
+            <div class="card"><span class="number">4</span><h3>从系统打印界面选择</h3><p>在 Apple 设备支持打印的应用中打开系统打印界面，选择共享队列。停止共享后，新请求会被拒绝并撤回对应广播。</p></div>
+          </div>
+          <div class="callout warning"><strong>当前验证范围</strong><p>本地协议模拟和 Windows 虚拟队列输出已通过；实际 iPhone/iPad/Mac 的系统发现和实体打印机出纸仍需连接设备后验收。</p></div>
+        </section>
+
+        <section class="content" id="architecture" aria-labelledby="architecture-heading">
+          <span class="section-kicker">03 / Architecture</span><h2 id="architecture-heading">工作原理</h2>
+          <p class="intro">前端只负责列出、共享和停止队列；监听、发现、解码与打印都在 Rust 后端。每个传入作业会检查格式与选项，再送入指定队列。</p>
+          <div class="flow" role="list" aria-label="打印处理流程">
+            <div class="flow-step" role="listitem"><span class="step-number">STEP 01</span><strong>检测队列</strong><small>Windows 驱动与能力</small></div>
+            <div class="flow-step" role="listitem"><span class="step-number">STEP 02</span><strong>广播服务</strong><small>mDNS / DNS-SD</small></div>
+            <div class="flow-step" role="listitem"><span class="step-number">STEP 03</span><strong>接收作业</strong><small>IPP over HTTP</small></div>
+            <div class="flow-step" role="listitem"><span class="step-number">STEP 04</span><strong>渲染页面</strong><small>PDF / JPEG / Raster</small></div>
+            <div class="flow-step" role="listitem"><span class="step-number">STEP 05</span><strong>交给驱动</strong><small>GDI / Windows Spooler</small></div>
+          </div>
+          <div class="callout"><strong>作业状态</strong><p>IPP 先返回待处理状态，后续可查询或取消。Windows 队列消耗作业只能证明队列阶段结束，不能独立证明纸张已经输出。</p></div>
+        </section>
+
+        <section class="content" id="protocol" aria-labelledby="protocol-heading">
+          <span class="section-kicker">04 / Protocol</span><h2 id="protocol-heading">协议与文档格式</h2>
+          <div class="table-wrap"><table><thead><tr><th>环节</th><th>当前实现</th><th>说明</th></tr></thead><tbody>
+            <tr><td>局域网发现</td><td><code>_ipp._tcp</code>、<code>_universal._sub._ipp._tcp</code>、<code>_printer._tcp</code></td><td>AirPrint 客户端通过 DNS-SD/mDNS 获取服务地址、端口和资源路径；<code>_printer._tcp</code> 使用端口 0。</td></tr>
+            <tr><td>传输</td><td>IPP/HTTP</td><td>支持 Print-Job、Validate-Job、Create-Job、Send-Document（单文档）、Get-Job-Attributes、Get-Jobs 与 Cancel-Job。</td></tr>
+            <tr><td>文档格式</td><td>PDF、JPEG、URF、PWG Raster</td><td>PDF 使用 Windows PDF API；图像与所公布的光栅格式经渲染后由 GDI 交给驱动。</td></tr>
+            <tr><td>打印选项</td><td>彩色、双面、份数、纸型、方向</td><td>按 Windows 驱动能力公布；不支持的值会被拒绝。彩色队列默认使用驱动的彩色能力。</td></tr>
+          </tbody></table></div>
+          <p class="muted" style="margin-top: 15px">首选 IPP 端口 631；若被占用，使用 8631–8699 中的空闲端口，并通过 DNS-SD 公布实际值。<code>ipp://</code> URI 可省略默认的 631，HTTP <code>Host</code> 仍需指向连接端口。</p>
+          <div class="callout warning"><strong>兼容性声明</strong><p>该项目尚未通过完整 IPP Everywhere 1.1 一致性或 Apple 实机验收。当前未发布 <code>_print._sub._ipp._tcp</code>，也未声称支持全部规范扩展。URF 是为了客户端互操作提供的文档格式；发现与传输仍走 DNS-SD 和 IPP。</p></div>
+        </section>
+
+        <section class="content" id="network" aria-labelledby="network-heading">
+          <span class="section-kicker">05 / Network</span><h2 id="network-heading">网络与安全</h2>
+          <div class="split">
+            <div class="card"><h3>需要连通的端口</h3><ul><li>UDP <code>5353</code>：mDNS 发现</li><li>TCP <code>631</code>：首选 IPP</li><li>TCP <code>8631–8699</code>：631 被占用时的备用范围</li></ul><p>网线与 Wi-Fi 可以连接同一路由器；需要允许设备间通信与多播。</p></div>
+            <div class="card"><h3>有意开启的访问</h3><p>“允许局域网访问”会触发 Windows 管理员提示。通过后，规则仅针对 AirPrinter EXE 和本地子网，覆盖 Windows Private/Public 网络配置。</p><p style="margin-top: 10px">IPP 端点没有身份验证；请只在可信局域网启用共享。</p></div>
+          </div>
+          <p class="code-label">管理员 PowerShell 中的手动替代命令</p>
+          <pre><code>.\scripts\enable_firewall.ps1 -Program (Resolve-Path .\src-tauri\target\debug\airprinter.exe)</code></pre>
+          <p class="muted">使用安装版时，将 EXE 路径改为实际安装位置。打开此 HTML 文档不会修改网络或防火墙设置。</p>
+        </section>
+
+        <section class="content" id="development" aria-labelledby="development-heading">
+          <span class="section-kicker">06 / Build</span><h2 id="development-heading">开发与构建</h2>
+          <p class="intro">前端使用 TypeScript、Vite、Tailwind CSS 与 DaisyUI；后端使用 Rust、Tauri 2、<code>mdns-sd</code>、<code>tiny_http</code> 和 <code>ipp</code>。Windows 侧使用已安装的打印驱动与系统 PDF/图像 API。</p>
+          <p class="code-label">在项目根目录执行</p>
+          <pre><code>pnpm install
+pnpm tauri dev
+pnpm tauri build</code></pre>
+          <p class="muted">仅构建前端可运行 <code>pnpm build</code>。本机依赖目录由较新 pnpm 校验时，可运行 <code>pnpm --config.verify-deps-before-run=false run build</code>。</p>
+        </section>
+
+        <section class="content" id="testing" aria-labelledby="testing-heading">
+          <span class="section-kicker">07 / Verify</span><h2 id="testing-heading">验证与当前边界</h2>
+          <div class="card-grid">
+            <div class="card"><h3>已本地验证</h3><p>17 项后端测试通过，覆盖 IPP 路由、作业、URI、mDNS 注册/注销、重启恢复与光栅解码；Microsoft Print to PDF 模拟了四种格式的静默打印。</p></div>
+            <div class="card"><h3>尚需实机验证</h3><p>真实 Apple 系统打印面板的发现、不同路由器与防火墙环境、实体打印机的出纸、离线、缺纸和双面等行为。</p></div>
+          </div>
+          <p class="code-label">协议和本地打印模拟</p>
+          <pre><code>cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo test --manifest-path src-tauri/Cargo.toml --locked -- --include-ignored --nocapture
+python scripts/diagnose_mdns.py --self-test</code></pre>
+          <p class="code-label">独立 Node.js 客户端模拟</p>
+          <pre><code>cargo build --manifest-path src-tauri/Cargo.toml --example simulate_lan --locked
+node scripts/simulate_airprint.mjs 172.22.48.1</code></pre>
+          <p class="muted">JS 命令的 IP 应替换为本机主机专用虚拟网卡地址。此电脑的 Hyper-V 默认交换机不回送 mDNS 多播，因此该脚本将 DNS-SD 部分明确标为隔离 UDP 模拟；IPP 请求仍会访问真实 Rust 服务，且不会向虚构队列提交打印作业。</p>
+          <p class="code-label">从另一台设备检查实际广播</p>
+          <pre><code>python scripts/diagnose_mdns.py --seconds 8</code></pre>
+          <p class="muted">资源上限：单次上传 64 MiB、光栅解码累计 512 MiB、最多 500 页、单次 Windows 投递 120 秒、最多 4 个正在处理及 32 个未结束作业。</p>
+        </section>
+
+        <section class="content" id="files" aria-labelledby="files-heading">
+          <span class="section-kicker">08 / Source map</span><h2 id="files-heading">源码入口与参考</h2>
+          <div class="table-wrap"><table><thead><tr><th>路径</th><th>职责</th></tr></thead><tbody>
+            <tr><td><a href="../src/components/PrinterList.ts">PrinterList.ts</a></td><td>打印机列表、共享操作与局域网放行入口</td></tr>
+            <tr><td><a href="../src-tauri/src/services/printer_detector.rs">printer_detector.rs</a></td><td>Windows 队列检测与能力解析</td></tr>
+            <tr><td><a href="../src-tauri/src/services/airprint_server.rs">airprint_server.rs</a></td><td>共享选择、广播与 IPP 服务生命周期</td></tr>
+            <tr><td><a href="../src-tauri/src/services/mdns_broadcaster.rs">mdns_broadcaster.rs</a></td><td>DNS-SD/mDNS 注册、更新和撤回</td></tr>
+            <tr><td><a href="../src-tauri/src/services/ipp/server.rs">ipp/server.rs</a></td><td>IPP/HTTP 请求、打印机属性与作业管理</td></tr>
+            <tr><td><a href="../src-tauri/src/services/print_job.rs">print_job.rs</a> · <a href="../src-tauri/src/services/raster.rs">raster.rs</a></td><td>文档投递、Windows 作业状态与光栅解码</td></tr>
+            <tr><td><a href="../scripts/diagnose_mdns.py">diagnose_mdns.py</a> · <a href="../scripts/simulate_airprint.mjs">simulate_airprint.mjs</a></td><td>发现诊断与隔离客户端模拟</td></tr>
+          </tbody></table></div>
+          <div class="links" style="margin-top: 19px"><a href="../README.md">项目 README</a><a href="backend-audit.md">后端审核记录</a><a href="cs-ippeve11-20200515-5100.14.pdf">IPP Everywhere 文档 PDF</a><a href="https://www.rfc-editor.org/rfc/rfc6763">RFC 6763 · DNS-SD</a><a href="https://www.rfc-editor.org/rfc/rfc8010">RFC 8010 · IPP 传输</a></div>
+        </section>
+
+        <footer>AirPrinter · 静态 HTML 项目文档。内容以当前仓库实现为准；实体设备与 Apple 客户端的验收状态见“验证与当前边界”。</footer>
+      </main>
+    </div>
+  </body>
+</html>

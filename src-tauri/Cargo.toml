@@ -29,19 +29,7 @@ rand = "0.8"
 ipp = "5.4.0"
 tempfile = "3.10"
 lazy_static = "1.4" 
+uuid = { version = "1", features = ["v5"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
-
-[source.crates-io]
-replace-with = 'tuna'
-
-[source.tuna]
-registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
-
-[http]
-check-revoke = false
-timeout = 60
-
-[net]
-git-fetch-with-cli = true

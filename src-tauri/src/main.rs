@@ -1,79 +1,83 @@
-// src-tauri/src/main.rs
-// 
-// AirPrinter 后端入口
-// 
-// 注意事项：
-// 1. 本应用实现了完整的 IPP Everywhere™ v1.1 规范
-// 2. 注册 3 个 mDNS 服务：_ipp._tcp、_printer._tcp(端口0)、_print._sub._ipp._tcp
-// 3. 所有服务必须使用相同的实例名称（规范要求）
-// 4. IPP 响应必须包含 ipp-features-supported = ipp-everywhere（iOS 必需）
-// 
-// 故障排除：
-// - Discovery App 能发现但 iOS 系统打印无法发现：检查 IPP 属性是否完整
-// - 完全无法发现：检查防火墙（UDP 5353, TCP 631）和路由器 AP 隔离
-
+// Windows queue bridge: DNS-SD discovery and IPP transport.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
 use tauri::Manager;
 
+use airprinter::services::{AirPrintServer, PrinterDetector};
 use airprinter::*;
-use airprinter::services::{PrinterDetector, AirPrintServer};
 
 // 导入命令
 use airprinter::commands::{
-    get_printers, 
-    share_printer, 
-    stop_printer, 
-    get_shared_printers, 
-    unshare_printer, 
-    set_language,
-    share_virtual_printer,    // 虚拟打印机分享
-    stop_virtual_printer,     // 停止虚拟打印机分享
-    AppState
+    enable_lan_access, get_printers, get_shared_printers, set_language, share_printer,
+    stop_printer, unshare_printer, AppState,
 };
 
 fn main() {
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║              🖨️  AirPrinter 启动中...                    ║");
     println!("╚══════════════════════════════════════════════════════════╝");
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        
         .setup(|app| {
+            let preferences = app.path().app_config_dir()?.join("shared-printers.json");
             app.manage(AppState {
                 detector: Mutex::new(PrinterDetector::new()),
-                server: Mutex::new(AirPrintServer::new()),
+                server: Mutex::new(
+                    AirPrintServer::with_preferences(preferences).map_err(std::io::Error::other)?,
+                ),
             });
-            
-            println!("✅ 后端初始化完成，当前语言: {}", rust_i18n::locale().to_string());
+
+            let handle = app.handle().clone();
+            thread::spawn(move || loop {
+                let state = handle.state::<AppState>();
+                let detected = match state.detector.lock() {
+                    Ok(detector) => detector.detect(),
+                    Err(error) => Err(error.to_string()),
+                };
+                match detected {
+                    Ok(printers) => {
+                        if let Ok(mut server) = state.server.lock() {
+                            for error in server.reconcile(&printers) {
+                                eprintln!("[AirPrinter] 共享同步失败: {error}");
+                            }
+                        }
+                    }
+                    Err(error) => eprintln!("[AirPrinter] 检测 Windows 打印机失败: {error}"),
+                }
+                thread::sleep(Duration::from_secs(30));
+            });
+
+            println!(
+                "✅ 后端初始化完成，当前语言: {}",
+                rust_i18n::locale().to_string()
+            );
             println!("");
             println!("📋 AirPrint 服务发现机制：");
             println!("   • _ipp._tcp (端口 631)              - 基础 IPP 服务");
             println!("   • _printer._tcp (端口 0)            - RFC 6763 Flagship Naming");
-            println!("   • _print._sub._ipp._tcp (端口 631)  - IPP Everywhere™ 子类型");
+            println!("   • _universal._sub._ipp._tcp        - AirPrint 发现子类型");
             println!("");
             println!("⚠️  使用提示：");
-            println!("   1. 确保手机和电脑在同一 Wi-Fi 网络");
-            println!("   2. 检查 Windows 防火墙是否放行 UDP 5353 和 TCP 631");
+            println!("   1. 确保手机和电脑在可互通的同一局域网，电脑可使用网线");
+            println!("   2. 点击“允许局域网访问”，为本程序放行 mDNS 和 IPP");
             println!("   3. 路由器不能开启 'AP隔离' / '客户端隔离'");
             println!("");
-            
+
             Ok(())
         })
-        
         .invoke_handler(tauri::generate_handler![
             get_printers,
             share_printer,
             stop_printer,
             get_shared_printers,
             unshare_printer,
+            enable_lan_access,
             set_language,
-            share_virtual_printer,   // 虚拟打印机分享
-            stop_virtual_printer,    // 停止虚拟打印机分享
         ])
-        
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

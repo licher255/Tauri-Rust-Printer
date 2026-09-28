@@ -1,7 +1,7 @@
 {
   "printers": {
     "title": "打印机列表",
-    "no_printers": "未发现打印机"
+    "no_printers": "未发现可共享的实体打印机。请先在 Windows 中安装打印机驱动并连接打印机，然后刷新。"
   },
   "logs": {
     "title": "运行日志",
@@ -23,7 +23,8 @@
     "share": "共享",
     "stop_sharing": "停止共享",
     "sharing": "共享中...",
-    "stopping": "停止中..."
+    "stopping": "停止中...",
+    "enable_lan_access": "允许局域网访问"
   },
   "common": {
     "loading": "加载中...",
@@ -32,13 +33,15 @@
   },
   "messages": {
     "share_success": "打印机共享成功",
-    "stop_success": "已停止共享"
+    "stop_success": "已停止共享",
+    "lan_access_enabled": "已允许局域网设备访问。"
   },
   "errors": {
     "load_failed": "加载打印机失败：{{error}}",
     "operation_failed": "操作失败：{{error}}",
     "fetch_failed": "获取列表失败：{{error}}",
-    "share_failed": "共享失败：{{error}}"
+    "share_failed": "共享失败：{{error}}",
+    "lan_access_failed": "无法开启局域网访问：{{error}}"
   },
   "debug": {
     "printers_received": "[调试] 收到 {{count}} 台打印机数据",
@@ -46,5 +49,8 @@
     "loading_printers": "[调试] 正在加载打印机列表...",
     "starting_share": "[调试] 开始共享：{{id}}",
     "stopping_share": "[调试] 停止共享：{{id}}"
+  },
+  "network": {
+    "lan_access_scope": "Windows 将请求管理员授权。规则仅允许本程序接受同一局域网设备的连接。"
   }
 }

@@ -10,3 +10,5 @@ pub use mdns_broadcaster::MdnsBroadcaster;
 pub mod ipp;
 pub use ipp::IppServer;
 
+pub mod print_job;
+pub mod raster;

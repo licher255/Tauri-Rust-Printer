@@ -121,8 +121,8 @@ Write-Host "诊断完成" -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "如果 AirPrint 仍然无法工作，请尝试:" -ForegroundColor White
-Write-Host "1. 以管理员身份运行 AirPrinter" -ForegroundColor Yellow
-Write-Host "2. 暂时关闭 Windows Defender 防火墙进行测试" -ForegroundColor Yellow
+Write-Host "1. 确认已经在应用里共享实体打印机；监听 TCP 631 本身不要求管理员权限" -ForegroundColor Yellow
+Write-Host "2. 使用 enable_firewall.ps1 为应用放行专用网络的本地子网，保留防火墙开启" -ForegroundColor Yellow
 Write-Host "3. 检查路由器是否阻止了多播流量" -ForegroundColor Yellow
 Write-Host "4. 确保 iOS 设备和电脑在同一网络" -ForegroundColor Yellow
 Write-Host ""

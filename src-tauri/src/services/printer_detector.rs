@@ -1,9 +1,5 @@
+use crate::models::printer::PrinterCapabilities;
 use crate::models::{Printer, PrinterStatus};
-use std::process::Command;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-// 引入翻译宏
-use rust_i18n::t;
 
 pub struct PrinterDetector;
 
@@ -12,173 +8,83 @@ impl PrinterDetector {
         Self
     }
 
-    pub fn detect(&self) -> Vec<Printer> {
-        // 翻译日志
-        println!("{}", t!("logs.detector_scanning"));
-
-        #[cfg(target_os = "windows")]
-        return self.detect_windows();
-
-        #[cfg(target_os = "macos")]
-        return self.detect_macos();
-
-        #[cfg(target_os = "linux")]
-        return self.detect_linux();
-    }
-
-    /// Windows: 使用 PowerShell 获取打印机列表
     #[cfg(target_os = "windows")]
-    fn detect_windows(&self) -> Vec<Printer> {
-        let mut printers = Vec::new();
-
-        let output = Command::new("powershell")
+    pub fn detect(&self) -> Result<Vec<Printer>, String> {
+        use std::os::windows::process::CommandExt;
+        let output = std::process::Command::new("powershell.exe")
             .args([
+                "-NoProfile",
+                "-NonInteractive",
                 "-Command",
-                "Get-Printer | Select-Object Name, PortName, PrinterStatus | ConvertTo-Json -Compress"
+                include_str!("windows_printers.ps1"),
             ])
-            .output();
-
-        match output {
-            Ok(result) if result.status.success() => {
-                let json_str = String::from_utf8_lossy(&result.stdout);
-                
-                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    let printer_list = if json_val.is_array() {
-                        json_val.as_array().unwrap().clone()
-                    } else {
-                        vec![json_val]
-                    };
-
-                    for (_i, p) in printer_list.iter().enumerate() {
-                        if let Some(name) = p.get("Name").and_then(|v| v.as_str()) {
-                            let port = p.get("PortName").and_then(|v| v.as_str()).unwrap_or("Unknown");
-                            let status_code = p.get("PrinterStatus").and_then(|v| v.as_i64()).unwrap_or(0);
-                            
-                            let status = if status_code == 7 || status_code == 9 || status_code == 8 {
-                                PrinterStatus::Offline
-                            } else {
-                                PrinterStatus::Online
-                            };
-                            
-                            // 翻译发现打印机的日志
-                            println!("{}", t!(
-                                "logs.detector_found_printer", 
-                                name = name, 
-                                port = port, 
-                                code = status_code, 
-                                status = format!("{:?}", status)
-                            ));
-                            
-                            // 生成稳定的 ID（基于打印机名称的哈希，而不是索引）
-                            let mut hasher = DefaultHasher::new();
-                            name.hash(&mut hasher);
-                            let name_hash = hasher.finish() % 10000;
-                            let safe_name = name.replace(" ", "-")
-                                .replace("(", "")
-                                .replace(")", "")
-                                .replace(".", "")
-                                .replace(",", "");
-                            
-                            printers.push(Printer {
-                                name: name.to_string(),
-                                id: format!("printer-{}-{}", name_hash, &safe_name[..safe_name.len().min(20)]),
-                                status,
-                            });
-                        }
-                    }
-                }
-            }
-            _ => {
-                // 翻译备用方案日志
-                println!("{}", t!("logs.detector_fallback_wmic"));
-                return self.detect_windows_wmic();
-            }
+            .creation_flags(0x08000000)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
         }
-
-        printers
+        parse_printers(&output.stdout)
     }
 
-    /// Windows 备用方案：wmic
-    #[cfg(target_os = "windows")]
-    fn detect_windows_wmic(&self) -> Vec<Printer> {
-        let mut printers = Vec::new();
+    #[cfg(not(target_os = "windows"))]
+    pub fn detect(&self) -> Result<Vec<Printer>, String> {
+        Err("Printer bridge requires Windows".into())
+    }
 
-        let output = Command::new("wmic")
-            .args(["printer", "get", "Name", "/format:csv"])
-            .output();
+    pub fn detect_one(&self, id: &str) -> Result<Option<Printer>, String> {
+        Ok(self.detect()?.into_iter().find(|printer| printer.id == id))
+    }
+}
 
-        if let Ok(result) = output {
-            let text = String::from_utf8_lossy(&result.stdout);
-            for line in text.lines().skip(1) {
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 2 {
-                    let name = parts.last().unwrap_or(&"Unknown").trim();
-                    if !name.is_empty() && name != "Name" {
-                        // 生成稳定的 ID（与主方案一致）
-                        let mut hasher = DefaultHasher::new();
-                        name.hash(&mut hasher);
-                        let name_hash = hasher.finish() % 10000;
-                        let safe_name = name.replace(" ", "-")
-                            .replace("(", "")
-                            .replace(")", "")
-                            .replace(".", "")
-                            .replace(",", "");
-                        
-                        printers.push(Printer {
-                            name: name.to_string(),
-                            id: format!("printer-{}-{}", name_hash, &safe_name[..safe_name.len().min(20)]),
-                            status: PrinterStatus::Online,
-                        });
-                    }
-                }
+fn parse_printers(data: &[u8]) -> Result<Vec<Printer>, String> {
+    #[derive(serde::Deserialize)]
+    struct Queue {
+        name: String,
+        status: u32,
+        capabilities: PrinterCapabilities,
+    }
+    let queues: Vec<Queue> = serde_json::from_slice(data).map_err(|e| e.to_string())?;
+    Ok(queues
+        .into_iter()
+        .map(|queue| {
+            // The name itself is the stable, lossless queue ID; resource_path handles URI encoding.
+            let status = if queue.status & (128 | 4096) != 0 {
+                PrinterStatus::Offline
+            } else if queue.status & (1 | 2 | 8 | 16 | 64 | 1048576 | 4194304) != 0 {
+                PrinterStatus::Error(format!("Windows printer status: {}", queue.status))
+            } else if queue.status & (512 | 1024 | 16384) != 0 {
+                PrinterStatus::Busy
+            } else {
+                PrinterStatus::Online
+            };
+            Printer {
+                id: queue.name.clone(),
+                name: queue.name,
+                status,
+                capabilities: queue.capabilities,
             }
-        }
+        })
+        .collect())
+}
 
-        printers
-    }
-
-    /// macOS: 使用 lpstat
-    #[cfg(target_os = "macos")]
-    fn detect_macos(&self) -> Vec<Printer> {
-        let mut printers = Vec::new();
-
-        if let Ok(output) = Command::new("lpstat").arg("-p").output() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            for (i, line) in text.lines().enumerate() {
-                if line.starts_with("printer ") {
-                    let name = line.split_whitespace().nth(1).unwrap_or("Unknown");
-                    let status = if line.contains("idle") || line.contains("ready") {
-                        PrinterStatus::Online
-                    } else {
-                        PrinterStatus::Offline
-                    };
-
-                    printers.push(Printer {
-                        name: name.to_string(),
-                        id: format!("mac-printer-{}", i),
-                        status,
-                    });
-                }
-            }
-        }
-
-        printers
-    }
-
-    /// Linux: 使用 lpstat
-    #[cfg(target_os = "linux")]
-    fn detect_linux(&self) -> Vec<Printer> {
-        self.detect_macos()
-    }
-
-    pub fn detect_one(&self, id: &str) -> Option<Printer> {
-        let printers = self.detect();
-        
-        // 翻译查找日志
-        println!("{}", t!("logs.detector_searching_id", id = id));
-        let ids: Vec<String> = printers.iter().map(|p| p.id.clone()).collect();
-        println!("{}", t!("logs.detector_available_printers", list = format!("{:?}", ids)));
-        
-        printers.into_iter().find(|p| p.id == id)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unicode_queues_and_status_flags() {
+        let printers = parse_printers(r#"[{"name":"办公室打印机共享队列","status":128,"capabilities":{"color":false,"duplex":true,"max_copies":99,"media":["iso_a4_210x297mm"],"default_media":"iso_a4_210x297mm"}}]"#.as_bytes()).unwrap();
+        assert_eq!(printers[0].id, "办公室打印机共享队列");
+        assert!(matches!(printers[0].status, PrinterStatus::Offline));
+        let mut encoded = serde_json::to_value(&printers[0].capabilities).unwrap();
+        encoded["color"] = serde_json::json!(true);
+        let printing =
+            serde_json::json!([{"name":"打印中", "status":1024, "capabilities":encoded}]);
+        assert!(matches!(
+            parse_printers(&serde_json::to_vec(&printing).unwrap()).unwrap()[0].status,
+            PrinterStatus::Busy
+        ));
+        assert!(parse_printers(b"not JSON").is_err());
+        assert!(parse_printers(b"[]").unwrap().is_empty());
     }
 }

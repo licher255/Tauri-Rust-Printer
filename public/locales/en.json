@@ -1,7 +1,7 @@
 {
   "printers": {
     "title": "Printers",
-    "no_printers": "No printers found"
+    "no_printers": "No shareable physical printers found. Install the Windows driver and connect your printer, then refresh."
   },
   "logs": {
     "title": "System Logs",
@@ -23,7 +23,8 @@
     "share": "Share",
     "stop_sharing": "Stop Sharing",
     "sharing": "Sharing...",
-    "stopping": "Stopping..."
+    "stopping": "Stopping...",
+    "enable_lan_access": "Allow LAN access"
   },
   "common": {
     "loading": "Loading...",
@@ -32,13 +33,15 @@
   },
   "messages": {
     "share_success": "Printer shared successfully",
-    "stop_success": "Sharing stopped successfully"
+    "stop_success": "Sharing stopped successfully",
+    "lan_access_enabled": "Local network access enabled."
   },
   "errors": {
     "load_failed": "Failed to load printers: {{error}}",
     "operation_failed": "Operation failed: {{error}}",
     "fetch_failed": "Failed to fetch list: {{error}}",
-    "share_failed": "Failed to share: {{error}}"
+    "share_failed": "Failed to share: {{error}}",
+    "lan_access_failed": "Could not enable LAN access: {{error}}"
   },
   "debug": {
     "printers_received": "[DEBUG] Received {{count}} printers",
@@ -46,5 +49,8 @@
     "loading_printers": "[DEBUG] Loading printer list...",
     "starting_share": "[DEBUG] Starting share: {{id}}",
     "stopping_share": "[DEBUG] Stopping share: {{id}}"
+  },
+  "network": {
+    "lan_access_scope": "Windows will ask for administrator approval. Access is limited to this app and devices on the local subnet."
   }
 }

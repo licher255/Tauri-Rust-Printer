@@ -1,279 +1,327 @@
-use mdns_sd::{ServiceDaemon, ServiceInfo};
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
+use crate::models::{printer::truncate_utf8, Printer};
+use mdns_sd::{DaemonEvent, IfKind, ServiceDaemon, ServiceInfo};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use local_ip_address::local_ip;
-use std::thread;
+use std::net::IpAddr;
 use std::time::Duration;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-// 引入翻译宏
-use rust_i18n::t;
+
 pub struct MdnsBroadcaster {
     daemon: ServiceDaemon,
-    service_name: String,
-    ip: String,
-    port: u16,
-    txt_records: HashMap<String, String>,
-    _heartbeat: Option<thread::JoinHandle<()>>,
-    running: Arc<AtomicBool>,
+    registrations: HashMap<String, Vec<String>>,
+    hostname: String,
 }
 
 impl MdnsBroadcaster {
     pub fn new() -> Result<Self, String> {
-        let daemon = ServiceDaemon::new()
-            // 使用 t! 宏替换硬编码中文
-            .map_err(|e| t!("errors.mdns_daemon_create_failed", error = e.to_string()).to_string())?;
-        
+        let daemon = ServiceDaemon::new().map_err(|e| e.to_string())?;
+        // The HTTP listener is currently IPv4-only; never publish unreachable AAAA records.
+        daemon
+            .disable_interface(IfKind::IPv6)
+            .map_err(|e| e.to_string())?;
+        let machine = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "airprinter".into());
+        let mut hasher = DefaultHasher::new();
+        machine.hash(&mut hasher);
+        let hostname = format!("airprinter-{:016x}.local.", hasher.finish());
         Ok(Self {
             daemon,
-            service_name: String::new(),
-            ip: String::new(),
-            port: 0,
-            txt_records: HashMap::new(),
-            _heartbeat: None,
-            running: Arc::new(AtomicBool::new(false)),
+            registrations: HashMap::new(),
+            hostname,
         })
     }
 
-    pub fn broadcast_airprint(
-        &mut self,
-        printer_name: &str,
+    pub fn hostname(&self) -> &str {
+        &self.hostname
+    }
+
+    pub fn new_on_interface(address: IpAddr) -> Result<Self, String> {
+        let broadcaster = Self::new()?;
+        let interfaces = local_ip_address::list_afinet_netifas().map_err(|e| e.to_string())?;
+        if !interfaces.iter().any(|(_, ip)| *ip == address) {
+            return Err(format!(
+                "Simulation interface {address} is not configured locally"
+            ));
+        }
+        for (_, ip) in interfaces {
+            if ip != address {
+                broadcaster
+                    .daemon
+                    .disable_interface(IfKind::Addr(ip))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(broadcaster)
+    }
+
+    fn service_info(
+        printer: &Printer,
+        hostname: &str,
         port: u16,
-    ) -> Result<(), String> {
-        let ip = local_ip()
-            .map_err(|e| t!("errors.mdns_get_ip_failed", error = e.to_string()).to_string())?;
-        
-        // 日志也使用翻译
-        println!("{}", t!("logs.mdns_local_ip", ip = ip.to_string()));
-        
-        // 检查是否为链路本地地址
-        let ip_str = ip.to_string();
-        if ip_str.starts_with("169.254.") {
-            eprintln!("[mDNS警告] 检测到链路本地地址 {}, 这可能影响服务发现", ip_str);
-        }
-        
-        // 使用打印机名生成服务名（保持与能工作的版本一致）
-        // 如果名称太长，截取前 25 个字符 + 哈希
-        let safe_name = printer_name.replace(" ", "-").replace("(", "").replace(")", "");
-        if safe_name.len() > 25 {
-            let mut hasher = DefaultHasher::new();
-            printer_name.hash(&mut hasher);
-            let hash_val = hasher.finish() % 10000;
-            self.service_name = format!("air-{}-{}", &safe_name[..25], hash_val);
-        } else {
-            self.service_name = format!("air-{}", safe_name);
-        }
-        self.ip = ip_str.clone();
-        self.port = port;
-
-        // 完整的 TXT 记录 (协议关键字保持英文，不要翻译)
-        let mut txt_records = HashMap::new();
-        txt_records.insert("txtvers".to_string(), "1".to_string());
-        txt_records.insert("qtotal".to_string(), "1".to_string());
-        txt_records.insert("rp".to_string(), "ipp/print".to_string());
-        txt_records.insert("ty".to_string(), printer_name.to_string());
-        txt_records.insert("product".to_string(), format!("({})", printer_name));
-        txt_records.insert("note".to_string(), "AirPrint Compatible Printer".to_string()); 
-        txt_records.insert("adminurl".to_string(), format!("http://{}:631/", ip));
-        txt_records.insert("pdl".to_string(), "application/pdf,image/urf,image/jpeg".to_string());
-        txt_records.insert("Color".to_string(), "T".to_string());
-        txt_records.insert("Duplex".to_string(), "T".to_string());
-        txt_records.insert("Scan".to_string(), "F".to_string());
-        txt_records.insert("Fax".to_string(), "F".to_string());
-        txt_records.insert("Copies".to_string(), "T".to_string());
-        txt_records.insert("Collate".to_string(), "T".to_string());
-        txt_records.insert("kind".to_string(), "document".to_string());
-        txt_records.insert("PaperMax".to_string(), "legal-A4".to_string());
-        
-        // AirPrint 必需的 URF字段
-        txt_records.insert("URF".to_string(), 
-            "V1.4,CP1,DM1,IS1,W8,RS300,SRGB24,ADOBERGB24".to_string()
-        );
-        
-        // 生成稳定的 UUID
-        let mut hasher = DefaultHasher::new();
-        printer_name.hash(&mut hasher);
-        let hash_val = hasher.finish();
-        
-        let uuid = format!("b15525c7-8885-4279-a0a2-{:012x}", hash_val % 0x1000000000000u64);
-        txt_records.insert("UUID".to_string(), uuid.clone());
-        
-        // 服务名称长度检查
-        let service_name_len = self.service_name.len();
-        println!("[mDNS调试] =======================================");
-        println!("[mDNS调试] 准备注册服务:");
-        println!("[mDNS调试]   服务名称: {} (长度: {})", self.service_name, service_name_len);
-        println!("[mDNS调试]   IP: {}, 端口: {}", ip_str, port);
-        println!("[mDNS调试]   UUID: {}", uuid);
-
-        // 解析 IP 地址字符串为 IpAddr
-        let ip_addr: std::net::IpAddr = ip_str.parse()
-            .map_err(|e| format!("解析 IP 地址失败: {}", e))?;
-        
-        // 构造主机名（使用标准格式）
-        let host_name = format!("{}._ipp._tcp.local.", self.service_name);
-        
-        // ========== 注册基础 _ipp._tcp 服务 ==========
-        let service_info = ServiceInfo::new(
-            "_ipp._tcp.local.",
-            &self.service_name,
-            &host_name,
-            ip_addr,
+        service_type: &str,
+    ) -> Result<ServiceInfo, String> {
+        let mut hash = DefaultHasher::new();
+        printer.id.hash(&mut hash);
+        hostname.hash(&mut hash);
+        // mdns-sd 0.11 does not escape dots in instance labels.
+        let label: String = printer
+            .name
+            .chars()
+            .map(|c| {
+                if c == '.' || c == '\\' || c.is_control() {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let name = format!("{}-{:016x}", truncate_utf8(&label, 46), hash.finish());
+        let properties = vec![
+            ("txtvers", "1".to_string()),
+            ("rp", printer.resource_path()),
+            ("qtotal", "1".to_string()),
+            ("UUID", printer.uuid(hostname)),
+            ("air", "none".to_string()),
+            ("ty", truncate_utf8(&printer.name, 100).to_string()),
+            ("product", "(AirPrinter Windows Bridge)".to_string()),
+            ("kind", "document".to_string()),
+            ("priority", "0".to_string()),
+            (
+                "pdl",
+                "application/pdf,image/urf,image/jpeg,image/pwg-raster".to_string(),
+            ),
+            ("URF", "V1.4,W8,SRGB24,RS300".to_string()),
+            (
+                "Color",
+                if printer.capabilities.color { "T" } else { "F" }.to_string(),
+            ),
+            (
+                "Duplex",
+                if printer.capabilities.duplex {
+                    "T"
+                } else {
+                    "F"
+                }
+                .to_string(),
+            ),
+            (
+                "Copies",
+                if printer.capabilities.max_copies > 1 {
+                    "T"
+                } else {
+                    "F"
+                }
+                .to_string(),
+            ),
+        ];
+        ServiceInfo::new(
+            service_type,
+            &name,
+            hostname,
+            "",
             port,
-            txt_records.clone(),
-        ).map_err(|e| {
-            eprintln!("[mDNS错误] 创建 ServiceInfo 失败: {}", e);
-            t!("errors.mdns_service_info_create_failed", error = e.to_string()).to_string()
-        })?;
+            properties.as_slice(),
+        )
+        .map(|info| info.enable_addr_auto())
+        .map_err(|e| e.to_string())
+    }
 
-        match self.daemon.register(service_info) {
-            Ok(()) => {
-                println!("[mDNS调试] 基础 _ipp._tcp 服务注册成功");
-            }
-            Err(e) => {
-                eprintln!("[mDNS错误] 注册基础服务失败: {}", e);
-                return Err(t!("errors.mdns_register_failed", error = e.to_string()).to_string());
-            }
+    pub fn broadcast_airprint(&mut self, printer: &Printer, port: u16) -> Result<(), String> {
+        if self.registrations.contains_key(&printer.id) {
+            return Err("Printer already advertised".into());
         }
-
-        // ========== 注册 _printer._tcp 服务 (RFC 6763) ==========
-        let printer_host_name = format!("{}._printer._tcp.local.", self.service_name);
-        let printer_service_info = ServiceInfo::new(
-            "_printer._tcp.local.",
-            &self.service_name,
-            &printer_host_name,
-            ip_addr,
-            0,
-            txt_records.clone(),
-        ).map_err(|e| {
-            eprintln!("[mDNS警告] 创建 _printer._tcp ServiceInfo 失败: {}", e);
-            t!("errors.mdns_service_info_create_failed", error = e.to_string()).to_string()
-        })?;
-
-        match self.daemon.register(printer_service_info) {
-            Ok(()) => {
-                println!("[mDNS调试] _printer._tcp 服务注册成功");
-            }
-            Err(e) => {
-                eprintln!("[mDNS警告] 注册 _printer._tcp 服务失败: {}", e);
-            }
-        }
-        
-        // ========== 注册 IPP Everywhere 子类型 _print._sub._ipp._tcp ==========
-        let subtype_host_name = format!("{}._print._sub._ipp._tcp.local.", self.service_name);
-        let print_service_info = ServiceInfo::new(
-            "_print._sub._ipp._tcp.local.",
-            &self.service_name,
-            &subtype_host_name,
-            ip_addr,
+        // A subtype's PTR targets the base _ipp instance. Register it ONCE, not
+        // as a second service with a different SRV target (which overwrites it).
+        let ipp = Self::service_info(
+            printer,
+            &self.hostname,
             port,
-            txt_records.clone(),
-        ).map_err(|e| {
-            eprintln!("[mDNS警告] 创建 IPP Everywhere 子类型 ServiceInfo 失败: {}", e);
-            t!("errors.mdns_service_info_create_failed", error = e.to_string()).to_string()
-        })?;
-
-        match self.daemon.register(print_service_info) {
-            Ok(()) => {
-                println!("[mDNS调试] IPP Everywhere 子类型服务注册成功");
+            "_universal._sub._ipp._tcp.local.",
+        )?;
+        let flagship = Self::service_info(printer, &self.hostname, 0, "_printer._tcp.local.")?;
+        let mut fullnames: Vec<String> = Vec::new();
+        let events = self.daemon.monitor().map_err(|e| e.to_string())?;
+        for info in [ipp, flagship] {
+            let fullname = info.get_fullname().to_string();
+            if let Err(error) = self.daemon.register(info) {
+                for registered in &fullnames {
+                    let _ = self.daemon.unregister(registered);
+                }
+                return Err(error.to_string());
             }
-            Err(e) => {
-                eprintln!("[mDNS警告] 注册 IPP Everywhere 子类型服务失败: {}", e);
+            fullnames.push(fullname);
+        }
+        let mut announced = HashSet::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while announced.len() < fullnames.len() {
+            match events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            {
+                Ok(DaemonEvent::Announce(name, _)) if fullnames.contains(&name) => {
+                    announced.insert(name);
+                }
+                Ok(DaemonEvent::Error(error)) => {
+                    for name in &fullnames {
+                        let _ = self.daemon.unregister(name);
+                    }
+                    return Err(error.to_string());
+                }
+                Ok(_) => (),
+                Err(_) => {
+                    for name in &fullnames {
+                        let _ = self.daemon.unregister(name);
+                    }
+                    return Err("No mDNS announcement on an available IPv4 interface".into());
+                }
             }
         }
-
-        self.txt_records = txt_records;
-
-        println!("{}", t!("logs.mdns_broadcast_success", name = self.service_name, ip = ip, port = port));
-        println!("[mDNS调试] 已注册 3 个服务: _ipp._tcp, _printer._tcp(0), _print._sub._ipp._tcp");
-
-        self.start_heartbeat(); 
-
+        self.registrations.insert(printer.id.clone(), fullnames);
         Ok(())
     }
 
-    fn start_heartbeat(&mut self) {
-        self.running.store(true, Ordering::Relaxed);
-        let running = self.running.clone();
-        let daemon = self.daemon.clone();
-        let service_name = self.service_name.clone();
-        let ip = self.ip.clone();
-        let port = self.port;
-        let txt_records = self.txt_records.clone();
-
-        self._heartbeat = Some(thread::spawn(move || {
-            let mut count = 0;
-            while running.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_secs(10));
-                count += 1;
-                
-                if count % 6 == 0 {
-                    println!("{}", t!("logs.mdns_heartbeat_renewing"));
-                    
-                    // 注销所有服务
-                    let _ = daemon.unregister(&format!("{}._ipp._tcp.local.", service_name));
-                    let _ = daemon.unregister(&format!("{}._printer._tcp.local.", service_name));
-                    let _ = daemon.unregister(&format!("{}._print._sub._ipp._tcp.local.", service_name));
-                    
-                    // 解析 IP 地址
-                    if let Ok(ip_addr) = ip.parse::<std::net::IpAddr>() {
-                        // 重新注册基础 _ipp._tcp 服务
-                        let host_name = format!("{}._ipp._tcp.local.", service_name);
-                        if let Ok(main_info) = ServiceInfo::new(
-                            "_ipp._tcp.local.",
-                            &service_name,
-                            &host_name,
-                            ip_addr,
-                            port,
-                            txt_records.clone(),
-                        ) {
-                            let _ = daemon.register(main_info);
-                        }
-                        
-                        // 重新注册 _printer._tcp 服务
-                        let printer_host_name = format!("{}._printer._tcp.local.", service_name);
-                        if let Ok(printer_info) = ServiceInfo::new(
-                            "_printer._tcp.local.",
-                            &service_name,
-                            &printer_host_name,
-                            ip_addr,
-                            0,
-                            txt_records.clone(),
-                        ) {
-                            let _ = daemon.register(printer_info);
-                        }
-                        
-                        // 重新注册 IPP Everywhere 子类型
-                        let subtype_host_name = format!("{}._print._sub._ipp._tcp.local.", service_name);
-                        if let Ok(print_info) = ServiceInfo::new(
-                            "_print._sub._ipp._tcp.local.",
-                            &service_name,
-                            &subtype_host_name,
-                            ip_addr,
-                            port,
-                            txt_records.clone(),
-                        ) {
-                            let _ = daemon.register(print_info);
-                        }
-                    }
-                }
+    pub fn stop(&mut self, printer_id: &str) -> Result<(), String> {
+        if let Some(fullnames) = self.registrations.get(printer_id) {
+            for fullname in fullnames {
+                self.daemon
+                    .unregister(fullname)
+                    .map_err(|e| e.to_string())?
+                    .recv_timeout(Duration::from_secs(2))
+                    .map_err(|e| e.to_string())?;
             }
-        }));
+        }
+        self.registrations.remove(printer_id);
+        Ok(())
     }
 
-    pub fn stop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        if !self.service_name.is_empty() {
-            let _ = self.daemon.unregister(&format!("{}._ipp._tcp.local.", self.service_name));
-            let _ = self.daemon.unregister(&format!("{}._printer._tcp.local.", self.service_name));
-            let _ = self.daemon.unregister(&format!("{}._print._sub._ipp._tcp.local.", self.service_name));
-            println!("{}", t!("logs.mdns_broadcast_stopped"));
+    pub fn refresh_airprint(&self, printer: &Printer, port: u16) -> Result<(), String> {
+        if !self.registrations.contains_key(&printer.id) {
+            return Err("Printer is not advertised".into());
         }
+        let ipp = Self::service_info(
+            printer,
+            &self.hostname,
+            port,
+            "_universal._sub._ipp._tcp.local.",
+        )?;
+        self.daemon.register(ipp).map_err(|e| e.to_string())
     }
 }
 
 impl Drop for MdnsBroadcaster {
     fn drop(&mut self) {
-        self.stop();
+        let ids: Vec<_> = self.registrations.keys().cloned().collect();
+        for id in ids {
+            let _ = self.stop(&id);
+        }
+        if let Ok(done) = self.daemon.shutdown() {
+            let _ = done.recv_timeout(Duration::from_secs(2));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::PrinterStatus;
+
+    #[test]
+    fn subtype_uses_base_instance_and_queue_specific_resource() {
+        let printer = Printer {
+            id: "queue-a".into(),
+            name: "办公室.彩色打印机".repeat(10),
+            status: PrinterStatus::Online,
+            capabilities: Default::default(),
+        };
+        let info = MdnsBroadcaster::service_info(
+            &printer,
+            "test-pc.local.",
+            631,
+            "_universal._sub._ipp._tcp.local.",
+        )
+        .unwrap();
+        assert_eq!(info.get_type(), "_ipp._tcp.local.");
+        assert_eq!(
+            info.get_subtype().as_deref(),
+            Some("_universal._sub._ipp._tcp.local.")
+        );
+        assert!(info.get_fullname().ends_with("._ipp._tcp.local."));
+        assert!(info.get_fullname().split('.').next().unwrap().len() <= 63);
+        assert_eq!(info.get_hostname(), "test-pc.local.");
+        assert_eq!(
+            info.get_property_val_str("rp"),
+            Some(printer.resource_path().as_str())
+        );
+        let txt_bytes: usize = info
+            .get_properties()
+            .iter()
+            .map(|entry| 2 + entry.key().len() + entry.val().map_or(0, |value| value.len()))
+            .sum();
+        assert!(txt_bytes <= 400, "TXT record grew to {txt_bytes} octets");
+        assert!(info.is_addr_auto());
+    }
+
+    #[test]
+    #[ignore = "Publishes two short-lived simulated printers over local mDNS"]
+    fn mdns_two_queues_resolve_and_withdraw() {
+        use mdns_sd::ServiceEvent;
+        let mut broadcaster = MdnsBroadcaster::new().unwrap();
+        let browser = ServiceDaemon::new().unwrap();
+        let events = browser.browse("_universal._sub._ipp._tcp.local.").unwrap();
+        let a = Printer {
+            id: format!("simulation-a-{}", std::process::id()),
+            name: "AirPrinter simulation A".into(),
+            status: PrinterStatus::Online,
+            capabilities: Default::default(),
+        };
+        let b = Printer {
+            id: format!("simulation-b-{}", std::process::id()),
+            name: "AirPrinter simulation B".into(),
+            status: PrinterStatus::Online,
+            capabilities: Default::default(),
+        };
+        broadcaster.broadcast_airprint(&a, 18631).unwrap();
+        broadcaster.broadcast_airprint(&b, 18632).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut resolved = HashMap::new();
+        while resolved.len() < 2 {
+            let event = events
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("mDNS resolution timed out");
+            if let ServiceEvent::ServiceResolved(info) = event {
+                let resource = info.get_property_val_str("rp").unwrap_or("").to_string();
+                if resource == a.resource_path() || resource == b.resource_path() {
+                    assert_eq!(info.get_hostname(), broadcaster.hostname());
+                    assert!(!info.get_addresses().is_empty());
+                    assert_eq!(
+                        info.get_port(),
+                        if resource == a.resource_path() {
+                            18631
+                        } else {
+                            18632
+                        }
+                    );
+                    resolved.insert(resource, info.get_fullname().to_string());
+                }
+            }
+        }
+        let name_a = resolved.get(&a.resource_path()).unwrap();
+        broadcaster.stop(&a.id).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let ServiceEvent::ServiceRemoved(_, name) = events
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("mDNS goodbye timed out")
+            {
+                if &name == name_a {
+                    break;
+                }
+            }
+        }
+        assert!(broadcaster.registrations.contains_key(&b.id));
+        broadcaster.stop(&b.id).unwrap();
+        browser
+            .shutdown()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
     }
 }
