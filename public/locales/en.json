@@ -1,4 +1,7 @@
 {
+  "app": {
+    "title": "🖨️ AirPrinter"
+  },
   "printers": {
     "title": "Printers",
     "no_printers": "No shareable physical printers found. Install the Windows driver and connect your printer, then refresh."
@@ -41,7 +44,8 @@
     "operation_failed": "Operation failed: {{error}}",
     "fetch_failed": "Failed to fetch list: {{error}}",
     "share_failed": "Failed to share: {{error}}",
-    "lan_access_failed": "Could not enable LAN access: {{error}}"
+    "lan_access_failed": "Could not enable LAN access: {{error}}",
+    "settings_failed": "Failed to apply settings: {{error}}"
   },
   "debug": {
     "printers_received": "[DEBUG] Received {{count}} printers",
@@ -52,5 +56,18 @@
   },
   "network": {
     "lan_access_scope": "Windows will ask for administrator approval. Access is limited to this app and devices on the local subnet."
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "close_to_tray": "Keep running in the system tray",
+    "close_to_tray_hint": "Closing the window hides the app; sharing stays active. Quit from the tray icon.",
+    "autostart": "Launch at Windows startup",
+    "autostart_hint": "Start AirPrinter automatically when you sign in."
+  },
+  "window": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "close": "Close"
   }
 }

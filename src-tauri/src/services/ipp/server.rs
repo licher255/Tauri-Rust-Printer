@@ -134,6 +134,7 @@ impl IppServer {
                     Ok(Some(request)) => {
                         // ponytail: bounded handlers, replace with a worker pool only if needed.
                         if active.load(Ordering::Acquire) >= 8 {
+                            eprintln!("[IPP] rejecting request: handler limit reached");
                             let _ = request.respond(Response::empty(503));
                             continue;
                         }
@@ -167,6 +168,61 @@ impl IppServer {
     }
 
     fn handle_request(mut request: tiny_http::Request, shared: &Shared, port: u16) {
+        eprintln!(
+            "[IPP] {} {} from {:?}",
+            request.method(),
+            request.url(),
+            request.remote_addr()
+        );
+        #[cfg(debug_assertions)]
+        if request.method() == &tiny_http::Method::Get && request.url() == "/debug/test.jpg" {
+            let _ = request.respond(
+                Response::from_data(include_bytes!("../../../tests/fixtures/quadrants.jpg").to_vec())
+                    .with_header(Header::from_bytes("Content-Type", "image/jpeg").unwrap()),
+            );
+            return;
+        }
+        #[cfg(debug_assertions)]
+        if request.method() == &tiny_http::Method::Get && request.url() == "/debug/jobs" {
+            let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+            let job = state
+                .jobs
+                .values()
+                .filter(|job| job.owner == "airprinter-debug")
+                .max_by_key(|job| job.id)
+                .map(|job| serde_json::json!({
+                    "id": job.id,
+                    "state": job.state,
+                    "reason": job.reason,
+                    "message": job.message,
+                    "spool_id": job.spool_id,
+                }));
+            let _ = request.respond(
+                Response::from_string(serde_json::json!({"job": job}).to_string())
+                    .with_header(Header::from_bytes("Content-Type", "application/json").unwrap()),
+            );
+            return;
+        }
+        #[cfg(debug_assertions)]
+        if request.method() == &tiny_http::Method::Get && request.url() == "/debug" {
+            let path = shared
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .printers
+                .keys()
+                .next()
+                .cloned();
+            let Some(path) = path else {
+                let _ = request.respond(Response::from_string("No shared printer"));
+                return;
+            };
+            let page = include_str!("debug.html").replace("__PATH__", &path);
+            let _ = request.respond(
+                Response::from_string(page)
+                    .with_header(Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap()),
+            );
+            return;
+        }
         let requested_path = request.url().to_string();
         let path = requested_path
             .split_once("/jobs/")
@@ -180,10 +236,12 @@ impl IppServer {
             .get(&path)
             .cloned();
         let Some((_, hostname)) = selected else {
+            eprintln!("[IPP] rejecting request: unknown path");
             let _ = request.respond(Response::empty(404));
             return;
         };
         if request.method() != &tiny_http::Method::Post {
+            eprintln!("[IPP] rejecting request: method is not POST");
             let _ = request.respond(Response::empty(405));
             return;
         }
@@ -194,7 +252,15 @@ impl IppServer {
             .map(|h| h.value.as_str())
             .unwrap_or("")
             .to_string();
+        eprintln!(
+            "[IPP] host={host:?} body_length={:?} content_type={:?} transfer_encoding={:?} expect={:?}",
+            request.body_length(),
+            request.headers().iter().find(|h| h.field.equiv("Content-Type")).map(|h| h.value.as_str()),
+            request.headers().iter().find(|h| h.field.equiv("Transfer-Encoding")).map(|h| h.value.as_str()),
+            request.headers().iter().find(|h| h.field.equiv("Expect")).map(|h| h.value.as_str()),
+        );
         if !valid_host(&host, &hostname, port) {
+            eprintln!("[IPP] rejecting request: invalid Host header");
             let _ = request.respond(Response::empty(400));
             return;
         }
@@ -204,6 +270,7 @@ impl IppServer {
             .find(|h| h.field.equiv("Content-Type"))
             .map(|h| h.value.as_str().split(';').next().unwrap_or("").trim());
         if !content_type.is_some_and(|c| c.eq_ignore_ascii_case("application/ipp")) {
+            eprintln!("[IPP] rejecting request: unsupported Content-Type");
             let _ = request.respond(Response::empty(415));
             return;
         }
@@ -211,6 +278,7 @@ impl IppServer {
             .body_length()
             .is_some_and(|size| size as u64 > MAX_UPLOAD)
         {
+            eprintln!("[IPP] rejecting request: Content-Length exceeds limit");
             let _ = request.respond(Response::empty(413));
             return;
         }
@@ -221,14 +289,18 @@ impl IppServer {
             .read_to_end(&mut body)
             .is_err()
         {
+            eprintln!("[IPP] rejecting request: failed to read body");
             let _ = request.respond(Response::empty(400));
             return;
         }
+        eprintln!("[IPP] body_bytes={}", body.len());
         if body.len() as u64 > MAX_UPLOAD {
+            eprintln!("[IPP] rejecting request: body exceeds limit");
             let _ = request.respond(Response::empty(413));
             return;
         }
         if body.len() < 9 {
+            eprintln!("[IPP] rejecting request: short body");
             let _ = request.respond(Response::empty(400));
             return;
         }
@@ -237,6 +309,7 @@ impl IppServer {
             std::panic::catch_unwind(|| IppParser::new(IppReader::new(Cursor::new(body))).parse());
         let response = match parsed {
             Ok(Ok(req)) => {
+                eprintln!("[IPP] operation={:#06x}", req.header().operation_or_status);
                 let job_path_matches = if requested_path != path {
                     requested_path
                         .strip_prefix(&format!("{path}/jobs/"))
@@ -257,6 +330,7 @@ impl IppServer {
             }
             _ => reply(IppVersion::v2_0(), id, StatusCode::ClientErrorBadRequest),
         };
+        eprintln!("[IPP] status={:#06x}", response.header().operation_or_status);
         let _ = request.respond(
             Response::from_data(response.to_bytes().to_vec())
                 .with_header(Header::from_bytes("Content-Type", "application/ipp").unwrap())
@@ -280,7 +354,8 @@ impl Drop for IppServer {
 }
 
 fn valid_host(authority: &str, hostname: &str, port: u16) -> bool {
-    let (host, supplied_port) = authority.rsplit_once(':').unwrap_or((authority, "80"));
+    // IPP's default port is 631; some clients omit it from the HTTP Host field.
+    let (host, supplied_port) = authority.rsplit_once(':').unwrap_or((authority, "631"));
     if supplied_port.parse::<u16>().ok() != Some(port) {
         return false;
     }
@@ -307,7 +382,7 @@ fn valid_host(authority: &str, hostname: &str, port: u16) -> bool {
 
 fn valid_ipp_authority(authority: &str, hostname: &str, port: u16) -> bool {
     // RFC 3510: an ipp:// URI without an explicit port means TCP 631.
-    // The HTTP Host header is separate and still carries the transport port.
+    // The HTTP Host header can also omit the default 631 port.
     if authority.rsplit_once(':').is_some() {
         valid_host(authority, hostname, port)
     } else {
@@ -362,6 +437,17 @@ fn keywords(values: &[&str]) -> IppValue {
     )
 }
 
+fn wants_printer_attribute(requested: Option<&IppValue>, name: &str) -> bool {
+    let matches = |value: &IppValue| {
+        matches!(value, IppValue::Keyword(key) if key == name || key == "all" || key == "printer-description" || key == "job-template")
+    };
+    match requested {
+        None => true,
+        Some(IppValue::Array(values)) => values.iter().any(matches),
+        Some(value) => matches(value),
+    }
+}
+
 fn options(
     req: &IppRequestResponse,
     printer: &Printer,
@@ -378,11 +464,15 @@ fn options(
             return Err(StatusCode::ClientErrorAttributesOrValuesNotSupported);
         }
     }
-    for (name, supported) in [
-        ("number-up", IppValue::Integer(1)),
-        ("print-quality", IppValue::Enum(4)),
-    ] {
+    for (name, supported) in [("number-up", IppValue::Integer(1))] {
         if attr(req, name).is_some_and(|v| v != &supported) {
+            return Err(StatusCode::ClientErrorAttributesOrValuesNotSupported);
+        }
+    }
+    if let Some(value) = attr(req, "print-quality") {
+        if let IppValue::Enum(quality @ 3..=5) = value {
+            options.quality = *quality;
+        } else {
             return Err(StatusCode::ClientErrorAttributesOrValuesNotSupported);
         }
     }
@@ -500,7 +590,7 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
         let port = host
             .rsplit_once(':')
             .and_then(|(_, p)| p.parse().ok())
-            .unwrap_or(80);
+            .unwrap_or(631);
         let valid = target.parse::<ipp::prelude::Uri>().ok().is_some_and(|uri| {
             uri.scheme_str() == Some("ipp")
                 && uri.path() == path
@@ -515,7 +605,20 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
     }
     let op = req.header().operation_or_status;
     if op == 0x000b {
-        return printer_attributes(shared, &printer, &uri, version, id);
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[IPP] requested-attributes={:?} document-format={:?}",
+            attr(&req, "requested-attributes"),
+            attr(&req, "document-format")
+        );
+        return printer_attributes(
+            shared,
+            &printer,
+            &uri,
+            version,
+            id,
+            attr(&req, "requested-attributes"),
+        );
     }
     if [0x0002, 0x0004, 0x0005, 0x0006].contains(&op)
         && matches!(
@@ -576,7 +679,7 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
     let port = host
         .rsplit_once(':')
         .and_then(|(_, number)| number.parse().ok())
-        .unwrap_or(80);
+        .unwrap_or(631);
     let supplied_job_uri_id = string_attr(&req, "job-uri")
         .and_then(|value| job_id_from_uri(value, path, &hostname, port));
     if attr(&req, "job-uri").is_some() && supplied_job_uri_id.is_none() {
@@ -645,9 +748,22 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
     if op == 0x0006 && attr(&req, "last-document") != Some(&IppValue::Boolean(true)) {
         return error(StatusCode::ServerErrorMultipleDocumentJobsNotSupported);
     }
+    #[cfg(debug_assertions)]
+    for name in [
+        "orientation-requested", "number-up", "print-quality", "page-ranges",
+        "print-scaling", "copies", "sides", "media", "print-color-mode",
+        "media-col", "compression", "document-format",
+    ] {
+        if let Some(value) = attr(&req, name) {
+            eprintln!("[IPP] job option {name}={value:?}");
+        }
+    }
     let opts = match options(&req, &printer, existing.as_ref().map(|j| &j.options)) {
         Ok(o) => o,
-        Err(e) => return error(e),
+        Err(e) => {
+            eprintln!("[IPP] job options rejected: {e:?}");
+            return error(e);
+        }
     };
     let mut format = string_attr(&req, "document-format")
         .unwrap_or("application/pdf")
@@ -901,6 +1017,7 @@ fn printer_attributes(
     uri: &str,
     version: IppVersion,
     id: u32,
+    requested: Option<&IppValue>,
 ) -> IppRequestResponse {
     let state = shared.lock().unwrap_or_else(|e| e.into_inner());
     let active = state
@@ -911,8 +1028,11 @@ fn printer_attributes(
     let available = matches!(printer.status, PrinterStatus::Online | PrinterStatus::Busy);
     let caps = &printer.capabilities;
     let mut response = reply(version, id, StatusCode::SuccessfulOk);
-    let mut put =
-        |name: &str, value| add(&mut response, DelimiterTag::PrinterAttributes, name, value);
+    let mut put = |name: &str, value| {
+        if wants_printer_attribute(requested, name) {
+            add(&mut response, DelimiterTag::PrinterAttributes, name, value);
+        }
+    };
     put("printer-uri-supported", IppValue::Uri(uri.into()));
     let hostname = state
         .printers
@@ -946,7 +1066,7 @@ fn printer_attributes(
     put("printer-kind", keywords(&["document"]));
     put(
         "printer-make-and-model",
-        IppValue::TextWithoutLanguage(format!("Windows print bridge: {}", printer.name)),
+        IppValue::TextWithoutLanguage(printer.name.clone()),
     );
     put(
         "printer-state",
@@ -975,8 +1095,8 @@ fn printer_attributes(
     put("uri-authentication-supported", keywords(&["none"]));
     put("uri-security-supported", keywords(&["none"]));
     put("ipp-versions-supported", keywords(&["1.1", "2.0"]));
-    // No certification claim: discovery and transport use IPP/DNS-SD, and
-    // complete IPP Everywhere conformance needs additional attributes/operations.
+    // iOS/iPadOS 的系统打印对话框要求该标记才会列出打印机（见 AGENTS.md）。
+    put("ipp-features-supported", keywords(&["ipp-everywhere"]));
     put(
         "operations-supported",
         IppValue::Array([2, 4, 5, 6, 8, 9, 10, 11].map(IppValue::Enum).to_vec()),
@@ -1029,7 +1149,10 @@ fn printer_attributes(
     put("number-up-supported", IppValue::Integer(1));
     put("page-ranges-supported", IppValue::Boolean(false));
     put("print-quality-default", IppValue::Enum(4));
-    put("print-quality-supported", IppValue::Enum(4));
+    put(
+        "print-quality-supported",
+        IppValue::Array([3, 4, 5].map(IppValue::Enum).to_vec()),
+    );
     put("print-scaling-default", IppValue::Keyword("fit".into()));
     put("print-scaling-supported", keywords(&["fit", "auto"]));
     put(
@@ -1064,6 +1187,7 @@ fn printer_attributes(
     );
     put("media-type-default", IppValue::Keyword("stationery".into()));
     put("media-type-supported", keywords(&["stationery"]));
+    put("media-source-supported", keywords(&["auto"]));
     put("finishings-default", IppValue::Enum(3));
     put("finishings-supported", IppValue::Enum(3));
     put("media-ready", IppValue::Keyword(caps.default_media.clone()));
@@ -1346,6 +1470,10 @@ mod tests {
 
     #[test]
     fn ipp_uris_may_omit_the_default_631_port() {
+        assert!(valid_host("pc.local", "pc.local.", 631));
+        assert!(valid_host("127.0.0.1", "pc.local.", 631));
+        assert!(!valid_host("pc.local", "pc.local.", 8631));
+        assert!(!valid_host("other.local", "pc.local.", 631));
         let server = IppServer::new("127.0.0.1", 0);
         let p = printer("default port client");
         server.add_printer(p.clone(), "pc.local.").unwrap();
@@ -1365,19 +1493,22 @@ mod tests {
             process(
                 &server.shared,
                 &path,
-                host,
+                "pc.local",
                 req(Operation::GetPrinterAttributes, &bonjour_uri)
             )
             .header()
             .operation_or_status,
             0
         );
-        let created = process(
-            &server.shared,
-            &path,
-            host,
-            req(Operation::CreateJob, &without_port),
+        let mut create = req(Operation::CreateJob, &without_port);
+        add(
+            &mut create,
+            DelimiterTag::JobAttributes,
+            "print-quality",
+            IppValue::Enum(5),
         );
+        let created = process(&server.shared, &path, "127.0.0.1", create);
+        assert_eq!(created.header().operation_or_status, 0);
         let id = job_id(&created);
 
         let mut lookup = req(Operation::GetJobAttributes, &without_port);
@@ -1387,7 +1518,7 @@ mod tests {
             "job-uri",
             IppValue::Uri(format!("{without_port}/jobs/{id}")),
         );
-        let result = process(&server.shared, &path, host, lookup);
+        let result = process(&server.shared, &path, "127.0.0.1", lookup);
         assert_eq!(attr(&result, "job-state"), Some(&IppValue::Enum(4)));
         assert!(!valid_ipp_authority("127.0.0.1", "pc.local.", 8631));
     }
@@ -1424,7 +1555,14 @@ mod tests {
                 .collect(),
             ),
         );
+        add(
+            &mut request,
+            DelimiterTag::JobAttributes,
+            "print-quality",
+            IppValue::Enum(5),
+        );
         let selected = options(&request, &p, None).unwrap();
+        assert_eq!(selected.quality, 5);
         assert_eq!(
             (
                 selected.paper_kind,
@@ -1460,6 +1598,25 @@ mod tests {
             Some("auto")
         );
         assert!(attr(&response, "which-jobs-supported").is_some());
+        assert_eq!(
+            attr(&response, "printer-make-and-model"),
+            Some(&IppValue::TextWithoutLanguage(p.name.clone()))
+        );
+
+        let mut request = req(Operation::GetPrinterAttributes, &uri);
+        add(
+            &mut request,
+            DelimiterTag::OperationAttributes,
+            "requested-attributes",
+            keywords(&["printer-state-reasons", "media-source-supported"]),
+        );
+        let filtered = process(&server.shared, &path, host, request);
+        assert!(attr(&filtered, "printer-state-reasons").is_some());
+        assert_eq!(
+            attr(&filtered, "media-source-supported"),
+            Some(&keywords(&["auto"]))
+        );
+        assert!(attr(&filtered, "printer-name").is_none());
     }
 
     #[test]

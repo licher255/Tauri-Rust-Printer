@@ -50,9 +50,11 @@ airprinter/
 │   ├── components/
 │   │   ├── Header.ts             # (Not actively used - inline in HTML)
 │   │   ├── LogPanel.ts           # Log display component
-│   │   └── PrinterList.ts        # Printer list with share/unshare buttons
+│   │   ├── PrinterList.ts        # Printer list with share/unshare buttons
+│   │   └── Settings.ts           # Settings panel (language, close-to-tray, autostart)
 │   ├── services/
 │   │   ├── printerService.ts     # Tauri invoke wrappers for printer commands
+│   │   ├── settingsService.ts    # Tauri invoke wrappers for settings commands
 │   │   └── logService.ts         # Frontend logging utility
 │   ├── i18n/
 │   │   └── index.ts              # i18next configuration
@@ -71,19 +73,23 @@ airprinter/
 │   │   ├── commands/
 │   │   │   ├── mod.rs            # AppState struct, module re-exports
 │   │   │   ├── printer.rs        # Tauri commands: get_printers, share_printer, etc.
-│   │   │   └── system.rs         # Tauri commands: set_language
+│   │   │   ├── settings.rs       # Tauri commands: get_settings, set_close_to_tray, set_autostart
+│   │   │   └── system.rs         # Tauri commands: set_language (persists + refreshes tray menu)
 │   │   ├── models/
 │   │   │   ├── mod.rs            # Module exports
-│   │   │   └── printer.rs        # Printer struct, PrinterStatus enum
+│   │   │   ├── printer.rs        # Printer struct, PrinterStatus enum
+│   │   │   └── settings.rs       # AppSettings struct (language, close_to_tray, autostart)
 │   │   └── services/
 │   │       ├── mod.rs            # Service exports
 │   │       ├── printer_detector.rs  # Windows printer detection (PowerShell/WMIC)
 │   │       ├── airprint_server.rs   # Main coordinator (mDNS + IPP)
 │   │       ├── mdns_broadcaster.rs  # mDNS service registration
+│   │       ├── settings.rs          # SettingsStore (settings.json) + autostart registry Run key
 │   │       ├── ipp/
 │   │       │   ├── mod.rs        # IPP module exports
 │   │       │   └── server.rs     # IPP protocol handler
 │   │       └── print_job.rs      # Print job processing
+│   │   ├── tray.rs               # (at src/ root) System tray icon, menu, close-to-tray support
 │   ├── locales/                  # Backend i18n YAML files
 │   │   ├── en.yml
 │   │   └── zh.yml

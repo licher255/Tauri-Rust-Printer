@@ -89,7 +89,7 @@ public static class AirPrinterNative {
     [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr handle);
     [DllImport("kernel32.dll")] static extern IntPtr GlobalFree(IntPtr handle);
 
-    public static int Print(string queue, string[] pages, int copies, string sides, string color, int paperKind, int paperWidth, int paperHeight, int orientation, string name, string cancel, string idFile, string output) {
+    public static int Print(string queue, string[] pages, int copies, int quality, string sides, string color, int paperKind, int paperWidth, int paperHeight, int orientation, string name, string cancel, string idFile, string output) {
         var settings = new PrinterSettings();
         settings.PrinterName = queue;
         if (!settings.IsValid) throw new InvalidOperationException("Windows printer is unavailable: " + queue);
@@ -99,6 +99,12 @@ public static class AirPrinterNative {
         if (sides != "one-sided" && !settings.CanDuplex) throw new InvalidOperationException("Printer cannot duplex");
         settings.Duplex = sides == "two-sided-long-edge" ? Duplex.Vertical : sides == "two-sided-short-edge" ? Duplex.Horizontal : Duplex.Simplex;
         var pageSettings = settings.DefaultPageSettings;
+        if (quality != 4) {
+            var preferred = quality == 5 ? PrinterResolutionKind.High : PrinterResolutionKind.Draft;
+            foreach (PrinterResolution resolution in settings.PrinterResolutions) {
+                if (resolution.Kind == preferred) { pageSettings.PrinterResolution = resolution; break; }
+            }
+        }
         pageSettings.Landscape = orientation == 4 || orientation == 5;
         if (color == "color" && !settings.SupportsColor) throw new InvalidOperationException("Printer cannot print color");
         pageSettings.Color = color != "monochrome" && settings.SupportsColor;
@@ -156,5 +162,5 @@ public static class AirPrinterNative {
     }
 }
 '@
-$id = [AirPrinterNative]::Print($job.printer, [string[]]$pages, $job.copies, $job.sides, $job.color_mode, $job.paper_kind, $job.paper_width, $job.paper_height, $job.orientation, $job.name, $job.cancel, $job.spool_id, $job.output)
+$id = [AirPrinterNative]::Print($job.printer, [string[]]$pages, $job.copies, $job.quality, $job.sides, $job.color_mode, $job.paper_kind, $job.paper_width, $job.paper_height, $job.orientation, $job.name, $job.cancel, $job.spool_id, $job.output)
 @{ spool_id = $id } | ConvertTo-Json -Compress

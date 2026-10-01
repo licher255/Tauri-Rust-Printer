@@ -61,3 +61,7 @@ logs:
 
 mdns:
   note_content: "AirPrint Compatible Printer"
+
+tray:
+  show: "显示 AirPrinter"
+  quit: "退出"

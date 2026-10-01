@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+// Bump when an incompatible discovery/IPP profile change requires clients to refresh cached state.
+pub const DISCOVERY_REVISION: u8 = 2;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Printer {
     pub name: String,
@@ -82,7 +85,7 @@ impl Printer {
     pub fn uuid(&self, hostname: &str) -> String {
         uuid::Uuid::new_v5(
             &uuid::Uuid::NAMESPACE_DNS,
-            format!("{hostname}/{}", self.id).as_bytes(),
+            format!("{hostname}/{}:{DISCOVERY_REVISION}", self.id).as_bytes(),
         )
         .to_string()
     }

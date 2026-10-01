@@ -1,4 +1,7 @@
-use crate::models::{printer::truncate_utf8, Printer};
+use crate::models::{
+    printer::{truncate_utf8, DISCOVERY_REVISION},
+    Printer,
+};
 use mdns_sd::{DaemonEvent, IfKind, ServiceDaemon, ServiceInfo};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -63,6 +66,7 @@ impl MdnsBroadcaster {
         let mut hash = DefaultHasher::new();
         printer.id.hash(&mut hash);
         hostname.hash(&mut hash);
+        DISCOVERY_REVISION.hash(&mut hash);
         // mdns-sd 0.11 does not escape dots in instance labels.
         let label: String = printer
             .name
@@ -83,7 +87,7 @@ impl MdnsBroadcaster {
             ("UUID", printer.uuid(hostname)),
             ("air", "none".to_string()),
             ("ty", truncate_utf8(&printer.name, 100).to_string()),
-            ("product", "(AirPrinter Windows Bridge)".to_string()),
+            ("product", format!("({})", truncate_utf8(&printer.name, 32))),
             ("kind", "document".to_string()),
             ("priority", "0".to_string()),
             (
@@ -249,6 +253,10 @@ mod tests {
         assert_eq!(
             info.get_property_val_str("rp"),
             Some(printer.resource_path().as_str())
+        );
+        assert_eq!(
+            info.get_property_val_str("product"),
+            Some(format!("({})", truncate_utf8(&printer.name, 32)).as_str())
         );
         let txt_bytes: usize = info
             .get_properties()

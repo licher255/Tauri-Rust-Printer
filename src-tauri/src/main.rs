@@ -11,8 +11,8 @@ use airprinter::*;
 
 // 导入命令
 use airprinter::commands::{
-    enable_lan_access, get_printers, get_shared_printers, set_language, share_printer,
-    stop_printer, unshare_printer, AppState,
+    enable_lan_access, get_printers, get_settings, get_shared_printers, set_autostart,
+    set_close_to_tray, set_language, share_printer, stop_printer, unshare_printer, AppState,
 };
 
 fn main() {
@@ -23,16 +23,37 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let preferences = app.path().app_config_dir()?.join("shared-printers.json");
+            let config_dir = app.path().app_config_dir()?;
+            let preferences = config_dir.join("shared-printers.json");
+            let settings_path = config_dir.join("settings.json");
+            let settings_store =
+                airprinter::services::SettingsStore::load(settings_path).map_err(std::io::Error::other)?;
+            let settings = settings_store.get();
+
+            // 恢复上次选择的语言
+            rust_i18n::set_locale(&settings.language);
+
+            // 让注册表中的开机启动项与保存的设置保持一致
+            if settings.autostart {
+                if let Err(error) = airprinter::services::settings::apply_autostart(true) {
+                    eprintln!("[AirPrinter] 恢复开机启动失败: {error}");
+                }
+            }
+
             app.manage(AppState {
                 detector: Mutex::new(PrinterDetector::new()),
                 server: Mutex::new(
                     AirPrintServer::with_preferences(preferences).map_err(std::io::Error::other)?,
                 ),
+                settings: Mutex::new(settings_store),
             });
 
+            if let Err(error) = airprinter::tray::setup_tray(app.handle()) {
+                eprintln!("[AirPrinter] 系统托盘初始化失败: {error}");
+            }
+
             let handle = app.handle().clone();
-            thread::spawn(move || loop {
+            thread::spawn::<_, ()>(move || loop {
                 let state = handle.state::<AppState>();
                 let detected = match state.detector.lock() {
                     Ok(detector) => detector.detect(),
@@ -77,7 +98,24 @@ fn main() {
             unshare_printer,
             enable_lan_access,
             set_language,
+            get_settings,
+            set_close_to_tray,
+            set_autostart,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let close_to_tray = window
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .map(|store| store.get().close_to_tray)
+                    .unwrap_or(false);
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

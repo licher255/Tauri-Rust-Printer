@@ -1,5 +1,7 @@
 // src-tauri/src/commands/system.rs
+use super::AppState;
 use rust_i18n::t;
+use tauri::{AppHandle, State};
 
 #[cfg(target_os = "windows")]
 fn firewall_script(program: &std::path::Path) -> String {
@@ -55,20 +57,34 @@ mod tests {
 }
 
 #[tauri::command]
-pub fn set_language(lang: String) -> Result<(), String> {
+pub fn set_language(
+    lang: String,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<(), String> {
     // 标准化语言代码 (例如 zh-CN -> zh)
     let base_lang = lang.split('-').next().unwrap_or(&lang);
 
     // 简单的白名单验证
-    let valid_locales = ["en", "zh", "zh-CN", "zh-TW", "ja", "fr"];
+    let valid_locales = ["en", "zh"];
 
-    if !valid_locales.iter().any(|&l| l == base_lang || l == lang) {
+    let lang = if !valid_locales.contains(&base_lang) {
         eprintln!("Unsupported language: {}, falling back to en", lang);
-        rust_i18n::set_locale("en");
-        return Ok(());
-    }
+        "en".to_string()
+    } else {
+        base_lang.to_string()
+    };
 
     rust_i18n::set_locale(&lang);
+
+    // 记住用户选择，下次启动时恢复
+    if let Ok(mut store) = state.settings.lock() {
+        if let Err(error) = store.update(|s| s.language = lang.clone()) {
+            eprintln!("Failed to persist language setting: {error}");
+        }
+    }
+
+    crate::tray::refresh_tray_menu(&app);
 
     // 确保 locales 文件中有 messages.lang_switched 这个 key
     println!("{}", t!("messages.lang_switched", locale = lang));

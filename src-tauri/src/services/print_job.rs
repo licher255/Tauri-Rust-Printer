@@ -13,6 +13,7 @@ pub const FORMATS: &[&str] = &[
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrintOptions {
     pub copies: i32,
+    pub quality: i32,
     pub sides: String,
     pub color_mode: String,
     pub media: String,
@@ -26,6 +27,7 @@ impl Default for PrintOptions {
     fn default() -> Self {
         Self {
             copies: 1,
+            quality: 4,
             sides: "one-sided".into(),
             color_mode: "auto".into(),
             media: "iso_a4_210x297mm".into(),
@@ -123,7 +125,7 @@ fn submit_windows(
         "printer": printer, "format": format, "input": input, "directory": directory.path(),
         "pages": pages, "cancel": cancel_path, "spool_id": id_path, "output": output,
         "name": format!("AirPrinter {}", directory.path().file_name().unwrap().to_string_lossy()),
-        "copies": options.copies, "sides": options.sides, "color_mode": options.color_mode, "media": options.media,
+        "copies": options.copies, "quality": options.quality, "sides": options.sides, "color_mode": options.color_mode, "media": options.media,
         "orientation": options.orientation,
         "paper_kind": options.paper_kind, "paper_width": options.paper_width, "paper_height": options.paper_height,
     });
