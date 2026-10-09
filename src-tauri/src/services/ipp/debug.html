@@ -29,7 +29,7 @@ function attr(tag, name, value) {
 }
 
 async function ipp(operation, extra, documentBytes = []) {
-  const uri = 'ipp://' + location.host + path;
+  const uri = (location.protocol === 'https:' ? 'ipps://' : 'ipp://') + location.host + path;
   const body = new Uint8Array([
     2, 0, 0, operation, 0, 0, 0, operation, 1,
     ...attr(0x47, 'attributes-charset', 'utf-8'),

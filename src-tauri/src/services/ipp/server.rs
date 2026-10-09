@@ -48,6 +48,8 @@ pub struct IppServer {
     shared: Shared,
     running: Arc<AtomicBool>,
     listener: Option<thread::JoinHandle<()>>,
+    secure_listener: Option<thread::JoinHandle<()>>,
+    secure_port: Option<u16>,
 }
 
 impl IppServer {
@@ -62,6 +64,8 @@ impl IppServer {
             })),
             running: Arc::new(AtomicBool::new(false)),
             listener: None,
+            secure_listener: None,
+            secure_port: None,
         }
     }
 
@@ -124,11 +128,52 @@ impl IppServer {
             .to_ip()
             .ok_or("Missing listener address")?
             .port();
+        self.running.store(true, Ordering::Release);
+        self.listener = Some(self.serve(server, port));
+        eprintln!("[IPP] listening on {}", self.address);
+        Ok(())
+    }
+
+    pub fn start_tls(&mut self, hostname: &str, directory: &std::path::Path) -> Result<(), String> {
+        if self.secure_listener.is_some() {
+            return Ok(());
+        }
+        let identity = super::tls::identity(directory, hostname)?;
+        let host = self
+            .address
+            .rsplit_once(':')
+            .map(|(h, _)| h)
+            .ok_or("Invalid IPP address")?;
+        // This range is already covered by the application's LAN firewall rule.
+        let mut last_error = String::from("No free IPPS port");
+        for port in 8631..=8699 {
+            let listener = match std::net::TcpListener::bind(format!("{host}:{port}")) {
+                Ok(listener) => listener,
+                Err(error) => {
+                    last_error = error.to_string();
+                    continue;
+                }
+            };
+            let server =
+                Server::from_listener(listener, Some(identity)).map_err(|e| e.to_string())?;
+            self.secure_listener = Some(self.serve(server, port));
+            self.secure_port = Some(port);
+            eprintln!("[IPPS] TLS listening on {host}:{port}");
+            return Ok(());
+        }
+        Err(last_error)
+    }
+
+    pub fn secure_port(&self) -> Option<u16> {
+        self.secure_port
+    }
+
+    fn serve(&self, server: Server, port: u16) -> thread::JoinHandle<()> {
         let shared = self.shared.clone();
         let running = self.running.clone();
         running.store(true, Ordering::Release);
         let active = Arc::new(AtomicUsize::new(0));
-        self.listener = Some(thread::spawn(move || {
+        thread::spawn(move || {
             while running.load(Ordering::Acquire) {
                 match server.recv_timeout(Duration::from_millis(100)) {
                     Ok(Some(request)) => {
@@ -156,8 +201,7 @@ impl IppServer {
                     Err(_) => break,
                 }
             }
-        }));
-        Ok(())
+        })
     }
 
     pub fn port(&self) -> Result<u16, String> {
@@ -169,34 +213,34 @@ impl IppServer {
 
     fn handle_request(mut request: tiny_http::Request, shared: &Shared, port: u16) {
         eprintln!(
-            "[IPP] {} {} from {:?}",
+            "[IPP] {} {} from {:?} secure={}",
             request.method(),
             request.url(),
-            request.remote_addr()
+            request.remote_addr(),
+            request.secure()
         );
         #[cfg(debug_assertions)]
         if request.method() == &tiny_http::Method::Get && request.url() == "/debug/test.jpg" {
             let _ = request.respond(
-                Response::from_data(include_bytes!("../../../tests/fixtures/quadrants.jpg").to_vec())
-                    .with_header(Header::from_bytes("Content-Type", "image/jpeg").unwrap()),
+                Response::from_data(
+                    include_bytes!("../../../tests/fixtures/quadrants.jpg").to_vec(),
+                )
+                .with_header(Header::from_bytes("Content-Type", "image/jpeg").unwrap()),
             );
             return;
         }
         #[cfg(debug_assertions)]
         if request.method() == &tiny_http::Method::Get && request.url() == "/debug/jobs" {
             let state = shared.lock().unwrap_or_else(|e| e.into_inner());
-            let job = state
-                .jobs
-                .values()
-                .filter(|job| job.owner == "airprinter-debug")
-                .max_by_key(|job| job.id)
-                .map(|job| serde_json::json!({
+            let job = state.jobs.values().max_by_key(|job| job.id).map(|job| {
+                serde_json::json!({
                     "id": job.id,
                     "state": job.state,
                     "reason": job.reason,
                     "message": job.message,
                     "spool_id": job.spool_id,
-                }));
+                })
+            });
             let _ = request.respond(
                 Response::from_string(serde_json::json!({"job": job}).to_string())
                     .with_header(Header::from_bytes("Content-Type", "application/json").unwrap()),
@@ -217,10 +261,9 @@ impl IppServer {
                 return;
             };
             let page = include_str!("debug.html").replace("__PATH__", &path);
-            let _ = request.respond(
-                Response::from_string(page)
-                    .with_header(Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap()),
-            );
+            let _ = request.respond(Response::from_string(page).with_header(
+                Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap(),
+            ));
             return;
         }
         let requested_path = request.url().to_string();
@@ -309,7 +352,10 @@ impl IppServer {
             std::panic::catch_unwind(|| IppParser::new(IppReader::new(Cursor::new(body))).parse());
         let response = match parsed {
             Ok(Ok(req)) => {
-                eprintln!("[IPP] operation={:#06x}", req.header().operation_or_status);
+                eprintln!(
+                    "[IPP] request_id={id} operation={:#06x}",
+                    req.header().operation_or_status
+                );
                 let job_path_matches = if requested_path != path {
                     requested_path
                         .strip_prefix(&format!("{path}/jobs/"))
@@ -323,14 +369,17 @@ impl IppServer {
                     true
                 };
                 if job_path_matches {
-                    process(shared, &path, &host, req)
+                    process_request(shared, &path, &host, req, request.secure())
                 } else {
                     reply(req.header().version, id, StatusCode::ClientErrorNotFound)
                 }
             }
             _ => reply(IppVersion::v2_0(), id, StatusCode::ClientErrorBadRequest),
         };
-        eprintln!("[IPP] status={:#06x}", response.header().operation_or_status);
+        eprintln!(
+            "[IPP] request_id={id} status={:#06x}",
+            response.header().operation_or_status
+        );
         let _ = request.respond(
             Response::from_data(response.to_bytes().to_vec())
                 .with_header(Header::from_bytes("Content-Type", "application/ipp").unwrap())
@@ -348,6 +397,9 @@ impl Drop for IppServer {
             .clear();
         self.running.store(false, Ordering::Release);
         if let Some(listener) = self.listener.take() {
+            let _ = listener.join();
+        }
+        if let Some(listener) = self.secure_listener.take() {
             let _ = listener.join();
         }
     }
@@ -390,9 +442,15 @@ fn valid_ipp_authority(authority: &str, hostname: &str, port: u16) -> bool {
     }
 }
 
-fn job_id_from_uri(value: &str, path: &str, hostname: &str, port: u16) -> Option<i32> {
+fn job_id_from_uri(
+    value: &str,
+    path: &str,
+    hostname: &str,
+    port: u16,
+    scheme: &str,
+) -> Option<i32> {
     let uri = value.parse::<ipp::prelude::Uri>().ok()?;
-    if uri.scheme_str() != Some("ipp") || uri.query().is_some() {
+    if uri.scheme_str() != Some(scheme) || uri.query().is_some() {
         return None;
     }
     let authority = uri.authority()?;
@@ -438,9 +496,7 @@ fn keywords(values: &[&str]) -> IppValue {
 }
 
 fn wants_printer_attribute(requested: Option<&IppValue>, name: &str) -> bool {
-    let matches = |value: &IppValue| {
-        matches!(value, IppValue::Keyword(key) if key == name || key == "all" || key == "printer-description" || key == "job-template")
-    };
+    let matches = |value: &IppValue| matches!(value, IppValue::Keyword(key) if key == name || key == "all" || key == "printer-description" || key == "job-template");
     match requested {
         None => true,
         Some(IppValue::Array(values)) => values.iter().any(matches),
@@ -553,7 +609,18 @@ fn options(
     Ok(options)
 }
 
+#[cfg(test)]
 fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> IppRequestResponse {
+    process_request(shared, path, host, req, false)
+}
+
+fn process_request(
+    shared: &Shared,
+    path: &str,
+    host: &str,
+    req: IppRequestResponse,
+    secure: bool,
+) -> IppRequestResponse {
     let id = req.header().request_id;
     let version = req.header().version;
     let error = |status| reply(version, id, status);
@@ -578,7 +645,8 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
             None => return error(StatusCode::ClientErrorNotFound),
         }
     };
-    let uri = format!("ipp://{host}{path}");
+    let scheme = if secure { "ipps" } else { "ipp" };
+    let uri = format!("{scheme}://{host}{path}");
     if let Some(target) = string_attr(&req, "printer-uri") {
         let hostname = shared
             .lock()
@@ -592,7 +660,7 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
             .and_then(|(_, p)| p.parse().ok())
             .unwrap_or(631);
         let valid = target.parse::<ipp::prelude::Uri>().ok().is_some_and(|uri| {
-            uri.scheme_str() == Some("ipp")
+            uri.scheme_str() == Some(scheme)
                 && uri.path() == path
                 && uri.query().is_none()
                 && uri
@@ -681,7 +749,7 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
         .and_then(|(_, number)| number.parse().ok())
         .unwrap_or(631);
     let supplied_job_uri_id = string_attr(&req, "job-uri")
-        .and_then(|value| job_id_from_uri(value, path, &hostname, port));
+        .and_then(|value| job_id_from_uri(value, path, &hostname, port, scheme));
     if attr(&req, "job-uri").is_some() && supplied_job_uri_id.is_none() {
         return error(StatusCode::ClientErrorNotFound);
     }
@@ -750,9 +818,18 @@ fn process(shared: &Shared, path: &str, host: &str, req: IppRequestResponse) -> 
     }
     #[cfg(debug_assertions)]
     for name in [
-        "orientation-requested", "number-up", "print-quality", "page-ranges",
-        "print-scaling", "copies", "sides", "media", "print-color-mode",
-        "media-col", "compression", "document-format",
+        "orientation-requested",
+        "number-up",
+        "print-quality",
+        "page-ranges",
+        "print-scaling",
+        "copies",
+        "sides",
+        "media",
+        "print-color-mode",
+        "media-col",
+        "compression",
+        "document-format",
     ] {
         if let Some(value) = attr(&req, name) {
             eprintln!("[IPP] job option {name}={value:?}");
@@ -900,6 +977,11 @@ fn job_group(job: &Job, uri: &str) -> IppAttributeGroup {
 }
 
 fn run_job(shared: Shared, job: Job, document: Vec<u8>, format: String) {
+    eprintln!(
+        "[IPP] job={} received document bytes={} format={format}",
+        job.id,
+        document.len()
+    );
     thread::spawn(move || {
         let backend = shared.lock().unwrap_or_else(|e| e.into_inner()).backend;
         set_job(&shared, job.id, 5, "job-transforming", "");
@@ -918,6 +1000,7 @@ fn run_job(shared: Shared, job: Job, document: Vec<u8>, format: String) {
                 }
             }
             Ok(spool_id) => {
+                eprintln!("[IPP] job={} Windows spool_id={spool_id}", job.id);
                 if let Some(current) = shared
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -999,6 +1082,9 @@ fn set_job(shared: &Shared, id: i32, state: i32, reason: &str, message: &str) {
         .jobs
         .get_mut(&id)
     {
+        if job.state != state || job.message != message {
+            eprintln!("[IPP] job={id} state={state} reason={reason} message={message}");
+        }
         if job.canceled.load(Ordering::Acquire) && state >= 7 {
             job.state = 7;
             job.reason = "job-canceled-by-user".into();
@@ -1093,7 +1179,14 @@ fn printer_attributes(
         keywords(&["completed", "not-completed", "all"]),
     );
     put("uri-authentication-supported", keywords(&["none"]));
-    put("uri-security-supported", keywords(&["none"]));
+    put(
+        "uri-security-supported",
+        keywords(&[if uri.starts_with("ipps:") {
+            "tls"
+        } else {
+            "none"
+        }]),
+    );
     put("ipp-versions-supported", keywords(&["1.1", "2.0"]));
     // iOS/iPadOS 的系统打印对话框要求该标记才会列出打印机（见 AGENTS.md）。
     put("ipp-features-supported", keywords(&["ipp-everywhere"]));
@@ -1308,7 +1401,15 @@ mod tests {
         }
     }
     fn req(op: Operation, uri: &str) -> IppRequestResponse {
-        IppRequestResponse::new(IppVersion::v2_0(), op, Some(uri.parse().unwrap()))
+        // Preserve the wire URI: ipp 5.4's client constructor rewrites ipps to ipp.
+        let mut request = IppRequestResponse::new(IppVersion::v2_0(), op, None);
+        add(
+            &mut request,
+            DelimiterTag::OperationAttributes,
+            "printer-uri",
+            IppValue::Uri(uri.into()),
+        );
+        request
     }
     fn job_id(response: &IppRequestResponse) -> i32 {
         match attr(response, "job-id").unwrap() {
@@ -1570,6 +1671,67 @@ mod tests {
                 selected.paper_height
             ),
             (256, 400, 600)
+        );
+    }
+
+    #[test]
+    fn secure_requests_keep_ipps_uris_for_printer_and_jobs() {
+        let server = IppServer::new("127.0.0.1", 0);
+        let p = printer("secure queue");
+        server.add_printer(p.clone(), "pc.local.").unwrap();
+        let path = format!("/{}", p.resource_path());
+        let host = "pc.local:8631";
+        let uri = format!("ipps://{host}{path}");
+        let response = process_request(
+            &server.shared,
+            &path,
+            host,
+            req(Operation::GetPrinterAttributes, &uri),
+            true,
+        );
+        assert_eq!(response.header().operation_or_status, 0);
+        assert_eq!(
+            string_attr(&response, "printer-uri-supported"),
+            Some(uri.as_str())
+        );
+        assert_eq!(
+            attr(&response, "uri-security-supported"),
+            Some(&keywords(&["tls"]))
+        );
+        let create = process_request(
+            &server.shared,
+            &path,
+            host,
+            req(Operation::CreateJob, &uri),
+            true,
+        );
+        assert_eq!(create.header().operation_or_status, 0);
+        let job_uri = string_attr(&create, "job-uri").unwrap();
+        assert!(job_uri.starts_with("ipps://pc.local:8631/"));
+        let mut lookup = req(Operation::GetJobAttributes, &uri);
+        add(
+            &mut lookup,
+            DelimiterTag::OperationAttributes,
+            "job-uri",
+            IppValue::Uri(job_uri.into()),
+        );
+        assert_eq!(
+            process_request(&server.shared, &path, host, lookup, true)
+                .header()
+                .operation_or_status,
+            0
+        );
+        assert_ne!(
+            process_request(
+                &server.shared,
+                &path,
+                host,
+                req(Operation::GetPrinterAttributes, &uri),
+                false
+            )
+            .header()
+            .operation_or_status,
+            0
         );
     }
 

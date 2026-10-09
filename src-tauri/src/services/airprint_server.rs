@@ -89,13 +89,17 @@ impl AirPrintServer {
             if self.ipp_server.is_none() {
                 let mut ipp = IppServer::new(&self.bind_address, 631);
                 ipp.start().map_err(|e| format!("IPP listener: {e}"))?;
+                if let Some(directory) = self.preferences.as_deref().and_then(|p| p.parent()) {
+                    ipp.start_tls(self.mdns.as_ref().unwrap().hostname(), directory)
+                        .map_err(|e| format!("IPPS listener: {e}"))?;
+                }
                 self.ipp_server = Some(ipp);
             }
             let mdns = self.mdns.as_mut().unwrap();
             let ipp = self.ipp_server.as_ref().unwrap();
             let port = ipp.port()?;
             ipp.add_printer(printer.clone(), mdns.hostname())?;
-            if let Err(error) = mdns.broadcast_airprint(&printer, port) {
+            if let Err(error) = mdns.broadcast_with_tls(&printer, port, ipp.secure_port()) {
                 ipp.remove_printer(&printer)?;
                 return Err(error);
             }
@@ -189,7 +193,11 @@ impl AirPrintServer {
                                     .as_ref()
                                     .and_then(|ipp| ipp.port().ok())
                                     .unwrap_or(631);
-                                if let Err(error) = mdns.refresh_airprint(printer, port) {
+                                let secure_port =
+                                    self.ipp_server.as_ref().and_then(|ipp| ipp.secure_port());
+                                if let Err(error) =
+                                    mdns.refresh_airprint(printer, port, secure_port)
+                                {
                                     errors.push(format!("{id}: {error}"));
                                     continue;
                                 }

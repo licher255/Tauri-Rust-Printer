@@ -80,7 +80,7 @@ impl MdnsBroadcaster {
             })
             .collect();
         let name = format!("{}-{:016x}", truncate_utf8(&label, 46), hash.finish());
-        let properties = vec![
+        let mut properties = vec![
             ("txtvers", "1".to_string()),
             ("rp", printer.resource_path()),
             ("qtotal", "1".to_string()),
@@ -118,6 +118,9 @@ impl MdnsBroadcaster {
                 .to_string(),
             ),
         ];
+        if service_type.contains("_ipps.") {
+            properties.push(("TLS", "1.2".into()));
+        }
         ServiceInfo::new(
             service_type,
             &name,
@@ -131,6 +134,15 @@ impl MdnsBroadcaster {
     }
 
     pub fn broadcast_airprint(&mut self, printer: &Printer, port: u16) -> Result<(), String> {
+        self.broadcast_with_tls(printer, port, None)
+    }
+
+    pub fn broadcast_with_tls(
+        &mut self,
+        printer: &Printer,
+        port: u16,
+        secure_port: Option<u16>,
+    ) -> Result<(), String> {
         if self.registrations.contains_key(&printer.id) {
             return Err("Printer already advertised".into());
         }
@@ -143,9 +155,18 @@ impl MdnsBroadcaster {
             "_universal._sub._ipp._tcp.local.",
         )?;
         let flagship = Self::service_info(printer, &self.hostname, 0, "_printer._tcp.local.")?;
+        let mut services = vec![ipp, flagship];
+        if let Some(port) = secure_port {
+            services.push(Self::service_info(
+                printer,
+                &self.hostname,
+                port,
+                "_universal._sub._ipps._tcp.local.",
+            )?);
+        }
         let mut fullnames: Vec<String> = Vec::new();
         let events = self.daemon.monitor().map_err(|e| e.to_string())?;
-        for info in [ipp, flagship] {
+        for info in services {
             let fullname = info.get_fullname().to_string();
             if let Err(error) = self.daemon.register(info) {
                 for registered in &fullnames {
@@ -196,7 +217,12 @@ impl MdnsBroadcaster {
         Ok(())
     }
 
-    pub fn refresh_airprint(&self, printer: &Printer, port: u16) -> Result<(), String> {
+    pub fn refresh_airprint(
+        &self,
+        printer: &Printer,
+        port: u16,
+        secure_port: Option<u16>,
+    ) -> Result<(), String> {
         if !self.registrations.contains_key(&printer.id) {
             return Err("Printer is not advertised".into());
         }
@@ -206,7 +232,17 @@ impl MdnsBroadcaster {
             port,
             "_universal._sub._ipp._tcp.local.",
         )?;
-        self.daemon.register(ipp).map_err(|e| e.to_string())
+        self.daemon.register(ipp).map_err(|e| e.to_string())?;
+        if let Some(port) = secure_port {
+            let ipps = Self::service_info(
+                printer,
+                &self.hostname,
+                port,
+                "_universal._sub._ipps._tcp.local.",
+            )?;
+            self.daemon.register(ipps).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -265,6 +301,24 @@ mod tests {
             .sum();
         assert!(txt_bytes <= 400, "TXT record grew to {txt_bytes} octets");
         assert!(info.is_addr_auto());
+        let secure = MdnsBroadcaster::service_info(
+            &printer,
+            "test-pc.local.",
+            8631,
+            "_universal._sub._ipps._tcp.local.",
+        )
+        .unwrap();
+        assert_eq!(secure.get_type(), "_ipps._tcp.local.");
+        assert_eq!(
+            secure.get_subtype().as_deref(),
+            Some("_universal._sub._ipps._tcp.local.")
+        );
+        assert_eq!(
+            secure.get_property_val_str("UUID"),
+            info.get_property_val_str("UUID")
+        );
+        assert_eq!(secure.get_property_val_str("TLS"), Some("1.2"));
+        assert_eq!(info.get_property_val_str("TLS"), None);
     }
 
     #[test]
